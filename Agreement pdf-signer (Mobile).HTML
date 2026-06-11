@@ -221,10 +221,10 @@
             position: absolute; cursor: grab;
             border: 2px dashed; border-radius: 4px; padding: 4px 10px;
             font-size: 12px; font-weight: 600; white-space: nowrap;
-            background: rgba(255,255,255,0.92);
+            background: transparent;
             display: flex; align-items: center; gap: 4px;
             user-select: none; touch-action: none;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.13);
+            text-shadow: 0 0 3px #fff, 0 0 3px #fff;
         }
         .ov:active { cursor: grabbing; }
         .ov-sig { justify-content: center; overflow: hidden; }
@@ -509,7 +509,7 @@ let selectedFontSize = 12;
 const fields = {
     initials:  { id:"initials",  label:"Initials",  type:"text", inputId:"inp-initials", specId:"spec-initials", color:"#4f46e5", xFrac:0.87, yFrac:0.93,                         overlays:{}, pages:new Set() },
     name:      { id:"name",      label:"Full Name", type:"text", inputId:"inp-name",     specId:"spec-name",     color:"#d97706", xFrac:0.08, yFrac:0.68,                         overlays:{}, pages:new Set() },
-    signature: { id:"signature", label:"Signature", type:"sig",  inputId:null,           specId:"spec-sig",      color:"#059669", xFrac:0.08, yFrac:0.55, wFrac:0.38, hFrac:0.09, overlays:{}, pages:new Set() },
+    signature: { id:"signature", label:"Signature", type:"sig",  inputId:null,           specId:"spec-sig",      color:"#059669", xFrac:0.08, yFrac:0.55, wFrac:0.30, hFrac:0.07, overlays:{}, pages:new Set() },
     date:      { id:"date",      label:"Date",      type:"text", inputId:"inp-date",     specId:"spec-date",     color:"#9333ea", xFrac:0.08, yFrac:0.78,                         overlays:{}, pages:new Set() },
 };
 
