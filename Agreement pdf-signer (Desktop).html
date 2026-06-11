@@ -1,0 +1,739 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>PDF Signer</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/signature_pad/4.1.7/signature_pad.umd.min.js"></script>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #f0f2f5; color: #1a1a2e; }
+        .app { display: flex; min-height: 100vh; }
+
+        /* ── Sidebar ── */
+        .sidebar {
+            width: 430px; min-width: 430px;
+            background: #fff;
+            padding: 20px 18px;
+            overflow-y: auto;
+            box-shadow: 2px 0 10px rgba(0,0,0,0.1);
+            display: flex; flex-direction: column; gap: 16px;
+            position: sticky; top: 0; height: 100vh;
+        }
+        h1 { font-size: 18px; font-weight: 700; }
+        h3 { font-size: 12px; font-weight: 700; color: #666; text-transform: uppercase; letter-spacing: .04em; margin-bottom: 8px; }
+
+        /* Upload */
+        .upload-zone {
+            border: 2px dashed #d1d5db; border-radius: 10px;
+            padding: 22px; text-align: center; cursor: pointer;
+            transition: all 0.2s; background: #f9fafb;
+        }
+        .upload-zone:hover, .upload-zone.drag-over { border-color: #4f46e5; background: #eef2ff; }
+        .upload-icon { font-size: 28px; margin-bottom: 6px; }
+        .upload-zone p { font-size: 13px; color: #555; }
+        .upload-hint { font-size: 11px; color: #aaa; margin-top: 3px; }
+        .file-loaded {
+            background: #f0fdf4; border: 1.5px solid #86efac;
+            border-radius: 8px; padding: 10px 14px;
+            display: flex; align-items: center; gap: 10px;
+        }
+        .fname { font-size: 13px; font-weight: 600; color: #166534; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .fmeta { font-size: 11px; color: #16a34a; }
+
+        /* Fields table */
+        .col-headers { display: grid; grid-template-columns: 88px 1fr 130px; gap: 6px; padding-bottom: 4px; border-bottom: 1px solid #f3f4f6; }
+        .col-h { font-size: 10px; font-weight: 600; color: #aaa; text-transform: uppercase; letter-spacing: .05em; }
+        .field-row { display: grid; grid-template-columns: 88px 1fr 130px; gap: 6px; align-items: center; padding: 5px 0; border-bottom: 1px solid #f9fafb; }
+        .field-row:last-child { border: none; }
+        .field-label { font-size: 12px; font-weight: 600; display: flex; align-items: center; gap: 5px; }
+        .dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+        input.vi, input.si {
+            padding: 7px 9px; border: 1.5px solid #e5e7eb; border-radius: 6px;
+            font-size: 12px; outline: none; width: 100%; transition: border-color 0.2s;
+        }
+        input.vi:focus, input.si:focus { border-color: #4f46e5; }
+        .sig-draw-label { font-size: 11px; color: #999; }
+
+        /* Page spec info */
+        .spec-hint {
+            background: #fffbeb; border: 1px solid #fde68a;
+            border-radius: 6px; padding: 9px 11px;
+            font-size: 11px; color: #92400e; line-height: 1.7;
+        }
+        .spec-hint code { background: #fef3c7; padding: 1px 4px; border-radius: 3px; font-size: 10px; }
+
+        /* Signature pad */
+        .sig-wrap {
+            border: 1.5px solid #d1d5db; border-radius: 8px;
+            background: #fff; position: relative; overflow: hidden; touch-action: none;
+        }
+        #sig-canvas { display: block; touch-action: none; cursor: crosshair; background: #fff; }
+        .sig-hint {
+            position: absolute; inset: 0;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 12px; color: #ccc; pointer-events: none; text-align: center; line-height: 1.6;
+        }
+
+        /* Style selects */
+        .style-select {
+            width: 100%; padding: 7px 9px;
+            border: 1.5px solid #e5e7eb; border-radius: 6px;
+            font-size: 12px; outline: none; background: #fff;
+            cursor: pointer; transition: border-color 0.2s;
+            appearance: none; -webkit-appearance: none;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%23aaa'/%3E%3C/svg%3E");
+            background-repeat: no-repeat;
+            background-position: right 9px center;
+            padding-right: 26px;
+        }
+        .style-select:focus { border-color: #4f46e5; }
+        .style-label { font-size: 11px; color: #888; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; margin-bottom: 4px; }
+
+        /* Buttons */
+        .btn { padding: 8px 14px; border: none; border-radius: 6px; font-size: 12px; font-weight: 600; cursor: pointer; transition: 0.2s; }
+        .btn-ghost { background: #f3f4f6; color: #555; }
+        .btn-ghost:hover { background: #e5e7eb; }
+        .btn-sm { padding: 5px 10px; font-size: 11px; flex-shrink: 0; }
+        .btn-primary { background: #4f46e5; color: #fff; font-size: 15px; padding: 13px; width: 100%; display: block; }
+        .btn-primary:hover:not(:disabled) { background: #4338ca; }
+        .btn-primary:disabled { background: #a5b4fc; cursor: not-allowed; }
+
+        .divider { height: 1px; background: #f0f0f0; flex-shrink: 0; }
+
+        /* Legend */
+        .legend { font-size: 11px; color: #777; line-height: 1.9; }
+
+        /* ── Main ── */
+        .main { flex: 1; padding: 28px 36px; display: flex; flex-direction: column; align-items: center; gap: 22px; }
+        .page-group { display: flex; flex-direction: column; align-items: center; gap: 6px; }
+        .page-label { font-size: 12px; color: #999; align-self: flex-start; }
+        .canvas-wrap { position: relative; box-shadow: 0 4px 20px rgba(0,0,0,0.15); display: inline-block; }
+        .canvas-wrap canvas { display: block; }
+
+        /* Overlays */
+        .ov {
+            position: absolute; cursor: grab;
+            border: 2px dashed; border-radius: 4px; padding: 3px 8px;
+            font-size: 11px; font-weight: 600; white-space: nowrap;
+            background: rgba(255,255,255,0.9);
+            display: flex; align-items: center; gap: 4px;
+            user-select: none; touch-action: none;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.13);
+        }
+        .ov:active { cursor: grabbing; }
+        .ov-sig { justify-content: center; overflow: hidden; }
+
+        /* Empty state */
+        .empty-state { text-align: center; padding: 100px 20px; color: #bbb; }
+        .empty-icon { font-size: 52px; margin-bottom: 14px; }
+        .empty-state p { font-size: 14px; }
+
+        @media (max-width: 720px) {
+            .app { flex-direction: column; }
+            .sidebar { width: 100%; min-width: 0; height: auto; position: static; }
+        }
+    </style>
+</head>
+<body>
+<div class="app">
+
+    <!-- ── SIDEBAR ── -->
+    <div class="sidebar">
+        <h1>&#9998; PDF Signer</h1>
+
+        <!-- 1. Upload -->
+        <div>
+            <h3>1 &#8212; Upload PDF</h3>
+            <div class="upload-zone" id="upload-zone" onclick="document.getElementById('file-input').click()">
+                <div class="upload-icon">&#128196;</div>
+                <p>Click or drag &amp; drop a PDF</p>
+                <p class="upload-hint">Any PDF document</p>
+            </div>
+            <input type="file" id="file-input" accept=".pdf" style="display:none" onchange="handleFile(this.files[0])">
+        </div>
+
+        <div class="divider"></div>
+
+        <!-- 2. Fields -->
+        <div>
+            <h3>2 &#8212; Fields &amp; Pages</h3>
+
+            <div class="spec-hint">
+                <strong>Pages column examples:</strong><br>
+                <code>all</code> &bull; <code>1-10</code> &bull; <code>1 to 10</code> &bull; <code>1,3,5</code> &bull;
+                <code>page 9</code> &bull; <code>9</code> &bull; <code>last page</code> &bull;
+                <code>all except 9</code> &bull; <code>all excluding page 9</code>
+            </div>
+
+            <div style="height:10px"></div>
+
+            <div class="col-headers">
+                <span class="col-h">Field</span>
+                <span class="col-h">Value</span>
+                <span class="col-h">Pages</span>
+            </div>
+
+            <!-- Initials -->
+            <div class="field-row">
+                <div class="field-label"><span class="dot" style="background:#4f46e5"></span>Initials</div>
+                <input class="vi" id="inp-initials" type="text" placeholder="e.g. J.L." maxlength="10" oninput="onValueChange('initials')">
+                <input class="si" id="spec-initials" type="text" placeholder="e.g. all" oninput="onSpecChange('initials')">
+            </div>
+
+            <!-- Full Name -->
+            <div class="field-row">
+                <div class="field-label"><span class="dot" style="background:#d97706"></span>Full Name</div>
+                <input class="vi" id="inp-name" type="text" placeholder="Full name" oninput="onValueChange('name')">
+                <input class="si" id="spec-name" type="text" placeholder="e.g. page 9" oninput="onSpecChange('name')">
+            </div>
+
+            <!-- Signature -->
+            <div class="field-row">
+                <div class="field-label"><span class="dot" style="background:#059669"></span>Signature</div>
+                <span class="sig-draw-label">&#8595; draw below</span>
+                <input class="si" id="spec-sig" type="text" placeholder="e.g. page 9" oninput="onSpecChange('signature')">
+            </div>
+
+            <!-- Date -->
+            <div class="field-row">
+                <div class="field-label"><span class="dot" style="background:#9333ea"></span>Date</div>
+                <input class="vi" id="inp-date" type="text" oninput="onValueChange('date')">
+                <input class="si" id="spec-date" type="text" placeholder="e.g. page 9" oninput="onSpecChange('date')">
+            </div>
+        </div>
+
+        <div class="divider"></div>
+
+        <!-- 3. Text Style -->
+        <div>
+            <h3>3 &#8212; Text Style</h3>
+            <div style="display:flex;gap:8px;align-items:flex-end">
+                <div style="flex:1">
+                    <div class="style-label">Font</div>
+                    <select id="sel-font" class="style-select" onchange="onFontChange()">
+                        <optgroup label="Helvetica">
+                            <option value="Helvetica_Normal" selected>Normal</option>
+                            <option value="Helvetica_Italic">Italic</option>
+                            <option value="Helvetica_Bold">Bold</option>
+                            <option value="Helvetica_BoldItalic">Bold Italic</option>
+                        </optgroup>
+                        <optgroup label="Times">
+                            <option value="Times_Normal">Normal</option>
+                            <option value="Times_Italic">Italic</option>
+                            <option value="Times_Bold">Bold</option>
+                            <option value="Times_BoldItalic">Bold Italic</option>
+                        </optgroup>
+                        <optgroup label="Courier">
+                            <option value="Courier_Normal">Normal</option>
+                            <option value="Courier_Italic">Italic</option>
+                            <option value="Courier_Bold">Bold</option>
+                            <option value="Courier_BoldItalic">Bold Italic</option>
+                        </optgroup>
+                    </select>
+                </div>
+                <div style="width:76px;flex-shrink:0">
+                    <div class="style-label">Size</div>
+                    <select id="sel-size" class="style-select" onchange="onSizeChange()">
+                        <option value="10">10 pt</option>
+                        <option value="11">11 pt</option>
+                        <option value="12" selected>12 pt</option>
+                        <option value="14">14 pt</option>
+                    </select>
+                </div>
+            </div>
+        </div>
+
+        <div class="divider"></div>
+
+        <!-- 4. Signature pad -->
+        <div>
+            <h3>4 &#8212; Draw Signature</h3>
+            <div class="sig-wrap">
+                <canvas id="sig-canvas" width="390" height="170"></canvas>
+                <div class="sig-hint" id="sig-hint">&#9998; Sign here &#8212; finger, stylus or mouse</div>
+            </div>
+            <div style="height:8px"></div>
+            <button class="btn btn-ghost btn-sm" onclick="clearSig()">&#8635; Clear</button>
+        </div>
+
+        <div class="divider"></div>
+
+        <!-- 5. Position + Generate -->
+        <div>
+            <h3>5 &#8212; Position &amp; Generate</h3>
+            <div class="legend">
+                Drag any coloured box on the pages to reposition it.<br>
+                Moving one box syncs all boxes for that field.<br><br>
+                <span style="color:#4f46e5;font-weight:700">&#9632;</span> Blue = Initials &nbsp;
+                <span style="color:#059669;font-weight:700">&#9632;</span> Green = Signature<br>
+                <span style="color:#d97706;font-weight:700">&#9632;</span> Orange = Full Name &nbsp;
+                <span style="color:#9333ea;font-weight:700">&#9632;</span> Purple = Date
+            </div>
+            <div style="height:12px"></div>
+            <button class="btn btn-primary" id="gen-btn" onclick="generatePDF()" disabled>&#8595; Generate Signed PDF</button>
+        </div>
+    </div>
+
+    <!-- ── MAIN ── -->
+    <div class="main" id="main">
+        <div class="empty-state">
+            <div class="empty-icon">&#128196;</div>
+            <p>Upload a PDF to get started</p>
+        </div>
+    </div>
+</div>
+
+<script>
+pdfjsLib.GlobalWorkerOptions.workerSrc =
+    "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+
+const SCALE = 1.3;
+
+// ── Font options ──────────────────────────────────────────────────────────────
+// std  → pdf-lib StandardFonts key (no network needed)
+// fetch → CDN URL for a TTF to embed (Calibri uses open-source Carlito)
+// fallback → StandardFonts key used when fetch fails
+const FONT_DEFS = {
+    Helvetica_Normal:     { std:"Helvetica",            css:{ family:"Helvetica,Arial,sans-serif",              style:"normal", weight:"normal" } },
+    Helvetica_Italic:     { std:"HelveticaOblique",     css:{ family:"Helvetica,Arial,sans-serif",              style:"italic", weight:"normal" } },
+    Helvetica_Bold:       { std:"HelveticaBold",        css:{ family:"Helvetica,Arial,sans-serif",              style:"normal", weight:"bold"   } },
+    Helvetica_BoldItalic: { std:"HelveticaBoldOblique", css:{ family:"Helvetica,Arial,sans-serif",              style:"italic", weight:"bold"   } },
+    Times_Normal:         { std:"TimesRoman",           css:{ family:'"Times New Roman",Times,serif',           style:"normal", weight:"normal" } },
+    Times_Italic:         { std:"TimesRomanItalic",     css:{ family:'"Times New Roman",Times,serif',           style:"italic", weight:"normal" } },
+    Times_Bold:           { std:"TimesRomanBold",       css:{ family:'"Times New Roman",Times,serif',           style:"normal", weight:"bold"   } },
+    Times_BoldItalic:     { std:"TimesRomanBoldItalic", css:{ family:'"Times New Roman",Times,serif',           style:"italic", weight:"bold"   } },
+    Courier_Normal:       { std:"Courier",              css:{ family:'"Courier New",Courier,monospace',         style:"normal", weight:"normal" } },
+    Courier_Italic:       { std:"CourierOblique",       css:{ family:'"Courier New",Courier,monospace',         style:"italic", weight:"normal" } },
+    Courier_Bold:         { std:"CourierBold",          css:{ family:'"Courier New",Courier,monospace',         style:"normal", weight:"bold"   } },
+    Courier_BoldItalic:   { std:"CourierBoldOblique",   css:{ family:'"Courier New",Courier,monospace',         style:"italic", weight:"bold"   } },
+};
+
+// ── State ─────────────────────────────────────────────────────────────────────
+let pdfFileBytes = null;       // Uint8Array, kept intact for pdf-lib
+let uploadedName  = "document";
+let totalPages    = 0;
+let renderedPages = {};        // { pageNum: { canvas, viewport, wrapper } }
+let sigPad        = null;
+let selectedFontKey  = "Helvetica_Normal";
+let selectedFontSize = 12;
+
+const fields = {
+    initials:  { id:"initials",  label:"Initials",   type:"text", inputId:"inp-initials", specId:"spec-initials", color:"#4f46e5", xFrac:0.87, yFrac:0.93,                         overlays:{}, pages:new Set() },
+    name:      { id:"name",      label:"Full Name",  type:"text", inputId:"inp-name",     specId:"spec-name",     color:"#d97706", xFrac:0.08, yFrac:0.68,                         overlays:{}, pages:new Set() },
+    signature: { id:"signature", label:"Signature",  type:"sig",  inputId:null,           specId:"spec-sig",      color:"#059669", xFrac:0.08, yFrac:0.55, wFrac:0.30, hFrac:0.07, overlays:{}, pages:new Set() },
+    date:      { id:"date",      label:"Date",       type:"text", inputId:"inp-date",     specId:"spec-date",     color:"#9333ea", xFrac:0.08, yFrac:0.78,                         overlays:{}, pages:new Set() },
+};
+
+// ── Boot ──────────────────────────────────────────────────────────────────────
+document.addEventListener("DOMContentLoaded", () => {
+    // Signature pad
+    const canvas = document.getElementById("sig-canvas");
+    sigPad = new SignaturePad(canvas, {
+        backgroundColor: "rgba(0,0,0,0)",
+        penColor: "#111",
+        minWidth: 0.5, maxWidth: 2,
+    });
+    sigPad.addEventListener("beginStroke", () => {
+        document.getElementById("sig-hint").style.display = "none";
+    });
+    sigPad.addEventListener("endStroke", updateSigPreviews);
+
+    // Pre-fill today's date
+    document.getElementById("inp-date").value = new Date().toLocaleDateString("en-GB");
+
+    // Drag & drop on upload zone
+    const zone = document.getElementById("upload-zone");
+    zone.addEventListener("dragover",  e => { e.preventDefault(); zone.classList.add("drag-over"); });
+    zone.addEventListener("dragleave", () => zone.classList.remove("drag-over"));
+    zone.addEventListener("drop", e => {
+        e.preventDefault(); zone.classList.remove("drag-over");
+        const f = e.dataTransfer.files[0];
+        if (f && f.type === "application/pdf") handleFile(f);
+    });
+});
+
+// ── File upload ───────────────────────────────────────────────────────────────
+function handleFile(file) {
+    if (!file) return;
+    uploadedName = file.name.replace(/\.pdf$/i, "");
+    const reader = new FileReader();
+    reader.onload = async e => {
+        pdfFileBytes = new Uint8Array(e.target.result);
+
+        // Update upload zone UI
+        const zone = document.getElementById("upload-zone");
+        zone.style.cssText = "padding:0;border:none;cursor:default;background:transparent";
+        zone.onclick = null;
+        zone.innerHTML = `<div class="file-loaded">
+            <span style="font-size:22px">&#128196;</span>
+            <div style="flex:1;overflow:hidden">
+                <div class="fname">${file.name}</div>
+                <div class="fmeta" id="fmeta">Loading&hellip;</div>
+            </div>
+            <button class="btn btn-ghost btn-sm" onclick="document.getElementById('file-input').click()">Replace</button>
+        </div>`;
+
+        await renderPDF();
+        document.getElementById("gen-btn").disabled = false;
+    };
+    reader.readAsArrayBuffer(file);
+}
+
+// ── PDF rendering ─────────────────────────────────────────────────────────────
+async function renderPDF() {
+    // Reset
+    document.getElementById("main").innerHTML = "";
+    renderedPages = {};
+    for (const f of Object.values(fields)) { f.overlays = {}; f.pages = new Set(); }
+
+    const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(pdfFileBytes) }).promise;
+    totalPages = pdf.numPages;
+    document.getElementById("fmeta").textContent = `${totalPages} page${totalPages > 1 ? "s" : ""}`;
+
+    for (let n = 1; n <= totalPages; n++) {
+        const page = await pdf.getPage(n);
+        const vp   = page.getViewport({ scale: SCALE });
+
+        const wrap = document.createElement("div");
+        wrap.className = "canvas-wrap";
+        wrap.style.width  = vp.width  + "px";
+        wrap.style.height = vp.height + "px";
+
+        const canvas = document.createElement("canvas");
+        canvas.width  = vp.width;
+        canvas.height = vp.height;
+        wrap.appendChild(canvas);
+        await page.render({ canvasContext: canvas.getContext("2d"), viewport: vp }).promise;
+
+        renderedPages[n] = { canvas, viewport: vp, wrapper: wrap };
+
+        const lbl = document.createElement("div");
+        lbl.className   = "page-label";
+        lbl.textContent = `Page ${n}`;
+
+        const grp = document.createElement("div");
+        grp.className = "page-group";
+        grp.append(lbl, wrap);
+        document.getElementById("main").appendChild(grp);
+    }
+
+    // Re-apply any existing page specs (after replacing a file)
+    for (const fid of Object.keys(fields)) {
+        if (document.getElementById(fields[fid].specId).value) applyPageSpec(fid);
+    }
+}
+
+// ── Value live-update ─────────────────────────────────────────────────────────
+function onValueChange(fieldId) {
+    const field = fields[fieldId];
+    const val = document.getElementById(field.inputId).value || field.label;
+    for (const ov of Object.values(field.overlays)) {
+        const t = ov.querySelector(".ov-text");
+        if (t) t.textContent = val;
+    }
+}
+
+// ── Page spec ─────────────────────────────────────────────────────────────────
+const _debounce = {};
+function onSpecChange(fieldId) {
+    clearTimeout(_debounce[fieldId]);
+    _debounce[fieldId] = setTimeout(() => applyPageSpec(fieldId), 350);
+}
+
+function applyPageSpec(fieldId) {
+    if (!totalPages) return;
+    const field    = fields[fieldId];
+    const specText = document.getElementById(field.specId).value;
+    const newPages = parsePageSpec(specText, totalPages);
+
+    // Remove stale overlays
+    for (const pn of Object.keys(field.overlays)) {
+        if (!newPages.has(+pn)) {
+            field.overlays[pn].remove();
+            delete field.overlays[pn];
+        }
+    }
+    // Add new overlays
+    for (const pn of newPages) {
+        if (!field.overlays[pn]) addOverlay(fieldId, pn);
+    }
+    field.pages = newPages;
+}
+
+// ── Overlay creation ──────────────────────────────────────────────────────────
+function addOverlay(fieldId, pageNum) {
+    const field = fields[fieldId];
+    const info  = renderedPages[pageNum];
+    if (!info) return;
+
+    const { wrapper } = info;
+    const ov = document.createElement("div");
+    ov.className = "ov" + (field.type === "sig" ? " ov-sig" : "");
+    ov.style.borderColor = field.color;
+    ov.style.color       = field.color;
+    ov.style.left = Math.round(field.xFrac * wrapper.offsetWidth)  + "px";
+    ov.style.top  = Math.round(field.yFrac * wrapper.offsetHeight) + "px";
+
+    if (field.type === "sig") {
+        ov.style.width  = Math.round(field.wFrac * wrapper.offsetWidth)  + "px";
+        ov.style.height = Math.round(field.hFrac * wrapper.offsetHeight) + "px";
+        if (!sigPad.isEmpty()) {
+            ov.style.padding = "0";
+            ov.innerHTML = `<img src="${sigPad.toDataURL("image/png")}" style="width:100%;height:100%;object-fit:contain;pointer-events:none;display:block">`;
+        } else {
+            ov.innerHTML = `&#9998; <span class="ov-text">Signature</span>`;
+        }
+    } else {
+        const val = field.inputId ? (document.getElementById(field.inputId).value || field.label) : field.label;
+        ov.innerHTML = `&#9783; <span class="ov-text">${val}</span>`;
+    }
+
+    makeDraggable(ov, wrapper, fieldId);
+    wrapper.appendChild(ov);
+    field.overlays[pageNum] = ov;
+}
+
+// ── Signature pad ─────────────────────────────────────────────────────────────
+function clearSig() {
+    sigPad.clear();
+    document.getElementById("sig-hint").style.display = "flex";
+    for (const ov of Object.values(fields.signature.overlays)) {
+        ov.style.padding  = "";
+        ov.style.overflow = "";
+        ov.innerHTML = `&#9998; <span class="ov-text">Signature</span>`;
+    }
+}
+
+function updateSigPreviews() {
+    if (sigPad.isEmpty()) return;
+    const url = sigPad.toDataURL("image/png");
+    for (const ov of Object.values(fields.signature.overlays)) {
+        ov.style.padding  = "0";
+        ov.style.overflow = "hidden";
+        ov.innerHTML = `<img src="${url}" style="width:100%;height:100%;object-fit:contain;pointer-events:none;display:block">`;
+    }
+}
+
+// ── Drag & drop (mouse + touch, synced across pages) ──────────────────────────
+function makeDraggable(el, container, fieldId) {
+    let sx, sy, sl, st;
+
+    function coord(e) {
+        const t = e.touches ? e.touches[0] : e;
+        return { x: t.clientX, y: t.clientY };
+    }
+    function start(e) {
+        e.preventDefault(); e.stopPropagation();
+        const c = coord(e);
+        sx = c.x; sy = c.y;
+        sl = parseInt(el.style.left) || 0;
+        st = parseInt(el.style.top)  || 0;
+        document.addEventListener("mousemove", move);
+        document.addEventListener("mouseup",   end);
+        document.addEventListener("touchmove", move, { passive: false });
+        document.addEventListener("touchend",  end);
+    }
+    function move(e) {
+        e.preventDefault();
+        const c = coord(e);
+        let nl = Math.max(0, Math.min(sl + (c.x - sx), container.offsetWidth  - el.offsetWidth));
+        let nt = Math.max(0, Math.min(st + (c.y - sy), container.offsetHeight - el.offsetHeight));
+        el.style.left = nl + "px";
+        el.style.top  = nt + "px";
+    }
+    function end() {
+        document.removeEventListener("mousemove", move);
+        document.removeEventListener("mouseup",   end);
+        document.removeEventListener("touchmove", move);
+        document.removeEventListener("touchend",  end);
+
+        if (!fieldId) return;
+        const field = fields[fieldId];
+        // Save fractional position
+        field.xFrac = parseInt(el.style.left) / container.offsetWidth;
+        field.yFrac = parseInt(el.style.top)  / container.offsetHeight;
+        // Sync sibling overlays
+        for (const [pn, ov] of Object.entries(field.overlays)) {
+            if (ov === el) continue;
+            const w = renderedPages[+pn]?.wrapper;
+            if (!w) continue;
+            ov.style.left = Math.max(0, Math.min(Math.round(field.xFrac * w.offsetWidth),  w.offsetWidth  - ov.offsetWidth))  + "px";
+            ov.style.top  = Math.max(0, Math.min(Math.round(field.yFrac * w.offsetHeight), w.offsetHeight - ov.offsetHeight)) + "px";
+        }
+    }
+    el.addEventListener("mousedown",  start);
+    el.addEventListener("touchstart", start, { passive: false });
+}
+
+// ── Page spec parser ──────────────────────────────────────────────────────────
+function parsePageSpec(spec, total) {
+    if (!spec || !spec.trim()) return new Set();
+    spec = spec.trim().toLowerCase();
+
+    // all / all pages / *
+    if (/^(all(\s+pages?)?|\*)$/.test(spec))
+        return new Set(Array.from({ length: total }, (_, i) => i + 1));
+
+    // last page / last
+    if (/^last(\s+page)?$/.test(spec)) return new Set([total]);
+
+    // first page / first
+    if (/^first(\s+page)?$/.test(spec)) return new Set([1]);
+
+    // all [pages] excluding/except/but <spec>
+    const exclM = spec.match(/^all(?:\s+pages?)?\s+(?:excluding|except|but)\s+(.+)$/);
+    if (exclM) {
+        const excl = parsePageSpec(exclM[1], total);
+        const all  = new Set(Array.from({ length: total }, (_, i) => i + 1));
+        excl.forEach(p => all.delete(p));
+        return all;
+    }
+
+    // comma/semicolon-separated parts
+    const pages = new Set();
+    for (let part of spec.split(/[,;]+/)) {
+        part = part.trim().replace(/^pages?\s+/, "").replace(/\s+pages?$/, "");
+        if (!part) continue;
+        if (part === "last")  { pages.add(total); continue; }
+        if (part === "first") { pages.add(1);     continue; }
+
+        // range: "1-10" or "1 to 10"
+        const rng = part.match(/^(\d+)\s*(?:-|to)\s*(\d+)$/);
+        if (rng) {
+            for (let i = Math.max(1, +rng[1]); i <= Math.min(total, +rng[2]); i++) pages.add(i);
+            continue;
+        }
+        // single number
+        const n = +part;
+        if (Number.isInteger(n) && n >= 1 && n <= total) pages.add(n);
+    }
+    return pages;
+}
+
+// ── Font / size controls ──────────────────────────────────────────────────────
+function onFontChange() {
+    selectedFontKey = document.getElementById("sel-font").value;
+    updateOverlayStyles();
+}
+
+function onSizeChange() {
+    selectedFontSize = parseInt(document.getElementById("sel-size").value);
+    updateOverlayStyles();
+}
+
+function updateOverlayStyles() {
+    const def = FONT_DEFS[selectedFontKey] || FONT_DEFS.Helvetica_Normal;
+    for (const [fid, field] of Object.entries(fields)) {
+        if (field.type === "sig") continue;
+        for (const ov of Object.values(field.overlays)) {
+            ov.style.fontFamily = def.css.family;
+            ov.style.fontStyle  = def.css.style;
+            ov.style.fontWeight = def.css.weight;
+            ov.style.fontSize   = selectedFontSize + "px";
+        }
+    }
+}
+
+
+// ── PDF generation ────────────────────────────────────────────────────────────
+async function generatePDF() {
+    if (!pdfFileBytes) { alert("Please upload a PDF first."); return; }
+    if (!Object.values(fields).some(f => f.pages.size > 0))
+        { alert("Specify pages for at least one field."); return; }
+    if (fields.signature.pages.size > 0 && sigPad.isEmpty())
+        { alert("Signature field has pages set but no signature drawn."); return; }
+
+    const btn = document.getElementById("gen-btn");
+    btn.disabled = true;
+    btn.textContent = "&#9203; Generating…";
+
+    try {
+        // Fresh copy so PDF.js worker detach doesn't affect us
+        const freshBytes = new Uint8Array(pdfFileBytes);
+        const pdfDoc = await PDFLib.PDFDocument.load(freshBytes, {
+            ignoreEncryption: true,
+            throwOnInvalidObject: false,
+        });
+
+        const fontDef = FONT_DEFS[selectedFontKey] || FONT_DEFS.Helvetica_Normal;
+        const font = await pdfDoc.embedFont(PDFLib.StandardFonts[fontDef.std]);
+
+        // Embed signature once if needed
+        let sigImg = null;
+        if (fields.signature.pages.size > 0 && !sigPad.isEmpty()) {
+            const b64 = sigPad.toDataURL("image/png").split(",")[1];
+            const bin = atob(b64);
+            const buf = new Uint8Array(bin.length);
+            for (let i = 0; i < bin.length; i++) buf[i] = bin.charCodeAt(i);
+            sigImg = await pdfDoc.embedPng(buf.buffer);
+        }
+
+        const pdfPages = pdfDoc.getPages();
+
+        for (let i = 0; i < pdfPages.length; i++) {
+            const page   = pdfPages[i];
+            const pn     = i + 1;
+            const { width, height } = page.getSize();
+            const info   = renderedPages[pn];
+            if (!info) continue;
+            const { viewport: vp } = info;
+
+            const toX = px => (px / vp.width)  * width;
+            const toY = (py, elH) => height - ((py + elH) / vp.height) * height;
+
+            for (const [fid, field] of Object.entries(fields)) {
+                if (!field.pages.has(pn)) continue;
+                const ov = field.overlays[pn];
+                if (!ov) continue;
+
+                const ox = parseInt(ov.style.left);
+                const oy = parseInt(ov.style.top);
+                const ow = ov.offsetWidth;
+                const oh = ov.offsetHeight;
+
+                if (field.type === "sig" && sigImg) {
+                    page.drawImage(sigImg, {
+                        x: toX(ox), y: toY(oy, oh),
+                        width:  (ow / vp.width)  * width,
+                        height: (oh / vp.height) * height,
+                    });
+                } else if (field.type === "text" && field.inputId) {
+                    const val = document.getElementById(field.inputId).value.trim();
+                    if (!val) continue;
+                    page.drawText(val, {
+                        x: toX(ox), y: toY(oy, oh) + 2,
+                        size:  selectedFontSize,
+                        font:  font,
+                        color: PDFLib.rgb(0, 0, 0),
+                    });
+                }
+            }
+        }
+
+        const out  = await pdfDoc.save();
+        const blob = new Blob([out], { type: "application/pdf" });
+        const url  = URL.createObjectURL(blob);
+        const a    = document.createElement("a");
+        a.href = url;
+        a.download = uploadedName + " - signed.pdf";
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+
+        btn.textContent = "&#10003; Downloaded!";
+        setTimeout(() => { btn.disabled = false; btn.textContent = "↓ Generate Signed PDF"; }, 4000);
+
+    } catch (err) {
+        console.error(err);
+        alert("Error: " + err.message);
+        btn.disabled = false;
+        btn.textContent = "↓ Generate Signed PDF";
+    }
+}
+</script>
+</body>
+</html>

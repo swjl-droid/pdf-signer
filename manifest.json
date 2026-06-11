@@ -1,0 +1,24 @@
+{
+  "name": "PDF Signer",
+  "short_name": "PDF Signer",
+  "description": "Sign PDF documents on your device",
+  "start_url": "./Agreement%20pdf-signer%20(Mobile).HTML",
+  "display": "standalone",
+  "background_color": "#f0f2f5",
+  "theme_color": "#4f46e5",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "./icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "./icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
