@@ -2,145 +2,262 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>PDF Signer</title>
+    <link rel="manifest" href="./manifest.json">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="PDF Signer">
+    <link rel="apple-touch-icon" href="./icons/icon-192.png">
+    <meta name="theme-color" content="#4f46e5">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/signature_pad/4.1.7/signature_pad.umd.min.js"></script>
     <style>
+        :root {
+            --indigo: #4f46e5;
+            --indigo-lt: #eef2ff;
+            --orange: #d97706;
+            --green: #059669;
+            --purple: #9333ea;
+            --radius: 12px;
+            --shadow: 0 2px 12px rgba(0,0,0,0.10);
+        }
         * { box-sizing: border-box; margin: 0; padding: 0; }
-        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #f0f2f5; color: #1a1a2e; }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            background: #f0f2f5;
+            color: #1a1a2e;
+            font-size: 15px;
+            /* iOS safe-area */
+            padding-bottom: env(safe-area-inset-bottom);
+        }
+
+        /* ── DESKTOP: sidebar + main ── */
         .app { display: flex; min-height: 100vh; }
 
-        /* ── Sidebar ── */
         .sidebar {
-            width: 430px; min-width: 430px;
+            width: 400px; min-width: 400px;
             background: #fff;
             padding: 20px 18px;
             overflow-y: auto;
-            box-shadow: 2px 0 10px rgba(0,0,0,0.1);
-            display: flex; flex-direction: column; gap: 16px;
+            box-shadow: 2px 0 10px rgba(0,0,0,0.08);
+            display: flex; flex-direction: column; gap: 0;
             position: sticky; top: 0; height: 100vh;
         }
-        h1 { font-size: 18px; font-weight: 700; }
-        h3 { font-size: 12px; font-weight: 700; color: #666; text-transform: uppercase; letter-spacing: .04em; margin-bottom: 8px; }
 
-        /* Upload */
-        .upload-zone {
-            border: 2px dashed #d1d5db; border-radius: 10px;
-            padding: 22px; text-align: center; cursor: pointer;
-            transition: all 0.2s; background: #f9fafb;
+        .app-title {
+            font-size: 20px; font-weight: 800; color: #1a1a2e;
+            padding-bottom: 16px; border-bottom: 1px solid #f0f0f0;
+            margin-bottom: 4px;
         }
-        .upload-zone:hover, .upload-zone.drag-over { border-color: #4f46e5; background: #eef2ff; }
-        .upload-icon { font-size: 28px; margin-bottom: 6px; }
-        .upload-zone p { font-size: 13px; color: #555; }
-        .upload-hint { font-size: 11px; color: #aaa; margin-top: 3px; }
+
+        .main-area {
+            flex: 1; padding: 28px 24px;
+            display: flex; flex-direction: column; align-items: center; gap: 20px;
+        }
+
+        /* ── Accordion steps ── */
+        .step {
+            border-bottom: 1px solid #f0f0f0;
+            overflow: hidden;
+        }
+        .step-header {
+            display: flex; align-items: center; gap: 10px;
+            padding: 14px 0; cursor: pointer;
+            user-select: none; -webkit-tap-highlight-color: transparent;
+        }
+        .step-num {
+            width: 26px; height: 26px; border-radius: 50%;
+            background: var(--indigo); color: #fff;
+            font-size: 12px; font-weight: 700;
+            display: flex; align-items: center; justify-content: center;
+            flex-shrink: 0;
+        }
+        .step-num.done { background: var(--green); }
+        .step-num.locked { background: #d1d5db; }
+        .step-title { font-size: 14px; font-weight: 700; color: #333; flex: 1; }
+        .step-summary { font-size: 12px; color: #999; }
+        .step-chevron {
+            font-size: 11px; color: #aaa;
+            transition: transform 0.2s;
+        }
+        .step.open .step-chevron { transform: rotate(180deg); }
+        .step-body {
+            display: none; padding: 0 0 16px;
+        }
+        .step.open .step-body { display: block; }
+
+        /* ── Upload zone ── */
+        .upload-zone {
+            border: 2px dashed #d1d5db; border-radius: var(--radius);
+            padding: 28px 20px; text-align: center; cursor: pointer;
+            transition: all 0.2s; background: #f9fafb;
+            -webkit-tap-highlight-color: transparent;
+        }
+        .upload-zone:hover, .upload-zone.drag-over { border-color: var(--indigo); background: var(--indigo-lt); }
+        .upload-icon { font-size: 36px; margin-bottom: 8px; }
+        .upload-zone p { font-size: 14px; color: #555; }
+        .upload-hint { font-size: 12px; color: #aaa; margin-top: 4px; }
+
         .file-loaded {
             background: #f0fdf4; border: 1.5px solid #86efac;
-            border-radius: 8px; padding: 10px 14px;
+            border-radius: 10px; padding: 12px 14px;
             display: flex; align-items: center; gap: 10px;
         }
-        .fname { font-size: 13px; font-weight: 600; color: #166534; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-        .fmeta { font-size: 11px; color: #16a34a; }
+        .fname { font-size: 14px; font-weight: 600; color: #166534; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .fmeta { font-size: 12px; color: #16a34a; margin-top: 1px; }
 
-        /* Fields table */
-        .col-headers { display: grid; grid-template-columns: 88px 1fr 130px; gap: 6px; padding-bottom: 4px; border-bottom: 1px solid #f3f4f6; }
-        .col-h { font-size: 10px; font-weight: 600; color: #aaa; text-transform: uppercase; letter-spacing: .05em; }
-        .field-row { display: grid; grid-template-columns: 88px 1fr 130px; gap: 6px; align-items: center; padding: 5px 0; border-bottom: 1px solid #f9fafb; }
-        .field-row:last-child { border: none; }
-        .field-label { font-size: 12px; font-weight: 600; display: flex; align-items: center; gap: 5px; }
-        .dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
-        input.vi, input.si {
-            padding: 7px 9px; border: 1.5px solid #e5e7eb; border-radius: 6px;
-            font-size: 12px; outline: none; width: 100%; transition: border-color 0.2s;
+        /* ── Field cards ── */
+        .field-card {
+            background: #fafafa; border: 1.5px solid #e5e7eb;
+            border-radius: 10px; padding: 12px 14px; margin-bottom: 10px;
         }
-        input.vi:focus, input.si:focus { border-color: #4f46e5; }
-        .sig-draw-label { font-size: 11px; color: #999; }
+        .field-card-header {
+            display: flex; align-items: center; gap: 8px; margin-bottom: 10px;
+        }
+        .dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+        .field-name { font-size: 13px; font-weight: 700; }
+        .field-row-inputs { display: flex; gap: 8px; }
+        .field-row-inputs .fi { flex: 1; }
+        .field-row-inputs .pi { width: 120px; flex-shrink: 0; }
 
-        /* Page spec info */
+        label.fi-label { font-size: 11px; color: #888; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; display: block; margin-bottom: 4px; }
+        input.fi-input {
+            width: 100%; padding: 10px 12px;
+            border: 1.5px solid #e5e7eb; border-radius: 8px;
+            font-size: 15px; outline: none;
+            transition: border-color 0.2s; background: #fff;
+            -webkit-appearance: none;
+        }
+        input.fi-input:focus { border-color: var(--indigo); }
+
+        /* Page chips */
+        .page-chips { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
+        .chip {
+            padding: 5px 10px; border-radius: 20px;
+            border: 1.5px solid #e5e7eb; background: #fff;
+            font-size: 12px; font-weight: 600; color: #555;
+            cursor: pointer; transition: all 0.15s;
+            -webkit-tap-highlight-color: transparent;
+        }
+        .chip:hover, .chip.active { background: var(--indigo); border-color: var(--indigo); color: #fff; }
+        .custom-pages-wrap { margin-top: 8px; display: none; }
+        .custom-pages-wrap.show { display: block; }
         .spec-hint {
-            background: #fffbeb; border: 1px solid #fde68a;
-            border-radius: 6px; padding: 9px 11px;
-            font-size: 11px; color: #92400e; line-height: 1.7;
-        }
-        .spec-hint code { background: #fef3c7; padding: 1px 4px; border-radius: 3px; font-size: 10px; }
-
-        /* Signature pad */
-        .sig-wrap {
-            border: 1.5px solid #d1d5db; border-radius: 8px;
-            background: #fff; position: relative; overflow: hidden; touch-action: none;
-        }
-        #sig-canvas { display: block; touch-action: none; cursor: crosshair; background: #fff; }
-        .sig-hint {
-            position: absolute; inset: 0;
-            display: flex; align-items: center; justify-content: center;
-            font-size: 12px; color: #ccc; pointer-events: none; text-align: center; line-height: 1.6;
+            font-size: 11px; color: #888; margin-bottom: 6px; line-height: 1.5;
         }
 
-        /* Style selects */
+        /* ── Style selects ── */
         .style-select {
-            width: 100%; padding: 7px 9px;
-            border: 1.5px solid #e5e7eb; border-radius: 6px;
-            font-size: 12px; outline: none; background: #fff;
+            width: 100%; padding: 10px 12px;
+            border: 1.5px solid #e5e7eb; border-radius: 8px;
+            font-size: 16px; /* prevent iOS zoom */ outline: none; background: #fff;
             cursor: pointer; transition: border-color 0.2s;
             appearance: none; -webkit-appearance: none;
             background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%23aaa'/%3E%3C/svg%3E");
             background-repeat: no-repeat;
-            background-position: right 9px center;
-            padding-right: 26px;
+            background-position: right 12px center;
+            padding-right: 30px;
         }
-        .style-select:focus { border-color: #4f46e5; }
-        .style-label { font-size: 11px; color: #888; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; margin-bottom: 4px; }
+        .style-select:focus { border-color: var(--indigo); }
+        .style-label { font-size: 11px; color: #888; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; display: block; margin-bottom: 4px; }
+        .style-row { display: flex; gap: 8px; align-items: flex-end; }
+        .style-row .font-wrap { flex: 1; }
+        .style-row .size-wrap { width: 88px; flex-shrink: 0; }
 
-        /* Buttons */
-        .btn { padding: 8px 14px; border: none; border-radius: 6px; font-size: 12px; font-weight: 600; cursor: pointer; transition: 0.2s; }
+        /* ── Signature pad ── */
+        .sig-wrap {
+            border: 2px solid #d1d5db; border-radius: 10px;
+            background: #fff; position: relative; overflow: hidden;
+            touch-action: none;
+        }
+        #sig-canvas { display: block; touch-action: none; cursor: crosshair; background: #fff; width: 100%; }
+        .sig-hint {
+            position: absolute; inset: 0;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 13px; color: #ccc; pointer-events: none; text-align: center; line-height: 1.6;
+        }
+        .sig-actions { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
+        .sig-status { font-size: 12px; color: #888; flex: 1; }
+        .sig-status.has-sig { color: var(--green); font-weight: 600; }
+
+        /* ── Buttons ── */
+        .btn {
+            padding: 10px 16px; border: none; border-radius: 8px;
+            font-size: 14px; font-weight: 600; cursor: pointer;
+            transition: all 0.15s; -webkit-tap-highlight-color: transparent;
+            min-height: 44px;
+        }
         .btn-ghost { background: #f3f4f6; color: #555; }
-        .btn-ghost:hover { background: #e5e7eb; }
-        .btn-sm { padding: 5px 10px; font-size: 11px; flex-shrink: 0; }
-        .btn-primary { background: #4f46e5; color: #fff; font-size: 15px; padding: 13px; width: 100%; display: block; }
-        .btn-primary:hover:not(:disabled) { background: #4338ca; }
+        .btn-ghost:hover, .btn-ghost:active { background: #e5e7eb; }
+        .btn-primary {
+            background: var(--indigo); color: #fff;
+            font-size: 16px; padding: 14px 20px; width: 100%; display: block;
+            border-radius: 10px; margin-top: 4px;
+        }
+        .btn-primary:hover:not(:disabled), .btn-primary:active:not(:disabled) { background: #4338ca; }
         .btn-primary:disabled { background: #a5b4fc; cursor: not-allowed; }
 
-        .divider { height: 1px; background: #f0f0f0; flex-shrink: 0; }
+        .legend {
+            font-size: 12px; color: #777; line-height: 2;
+            background: #f9fafb; border-radius: 8px;
+            padding: 10px 12px; margin-bottom: 12px;
+        }
 
-        /* Legend */
-        .legend { font-size: 11px; color: #777; line-height: 1.9; }
-
-        /* ── Main ── */
-        .main { flex: 1; padding: 28px 36px; display: flex; flex-direction: column; align-items: center; gap: 22px; }
-        .page-group { display: flex; flex-direction: column; align-items: center; gap: 6px; }
+        /* ── PDF main area ── */
+        .page-group { display: flex; flex-direction: column; align-items: center; gap: 6px; width: 100%; }
         .page-label { font-size: 12px; color: #999; align-self: flex-start; }
-        .canvas-wrap { position: relative; box-shadow: 0 4px 20px rgba(0,0,0,0.15); display: inline-block; }
-        .canvas-wrap canvas { display: block; }
+        .canvas-wrap { position: relative; box-shadow: var(--shadow); display: inline-block; max-width: 100%; }
+        .canvas-wrap canvas { display: block; max-width: 100%; height: auto; }
 
-        /* Overlays */
-        .ov {
-            position: absolute; cursor: grab;
-            border: 2px dashed; border-radius: 4px; padding: 3px 8px;
-            font-size: 11px; font-weight: 600; white-space: nowrap;
-            background: rgba(255,255,255,0.9);
-            display: flex; align-items: center; gap: 4px;
-            user-select: none; touch-action: none;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.13);
-        }
-        .ov:active { cursor: grabbing; }
-        /* Signature box: transparent (so the document underneath stays visible)
-           and sized/padded to match the mobile app's signature overlay. */
-        .ov-sig {
-            justify-content: center; overflow: hidden;
-            background: transparent; box-shadow: none;
-            padding: 4px 10px; font-size: 12px;
-            text-shadow: 0 0 3px #fff, 0 0 3px #fff;
-        }
-
-        /* Empty state */
-        .empty-state { text-align: center; padding: 100px 20px; color: #bbb; }
+        .empty-state { text-align: center; padding: 80px 20px; color: #bbb; }
         .empty-icon { font-size: 52px; margin-bottom: 14px; }
         .empty-state p { font-size: 14px; }
 
-        @media (max-width: 720px) {
+        /* ── Overlays ── */
+        .ov {
+            position: absolute; cursor: grab;
+            border: 2px dashed; border-radius: 4px; padding: 4px 10px;
+            font-size: 12px; font-weight: 600; white-space: nowrap;
+            background: transparent;
+            display: flex; align-items: center; gap: 4px;
+            user-select: none; touch-action: none;
+            text-shadow: 0 0 3px #fff, 0 0 3px #fff;
+        }
+        .ov:active { cursor: grabbing; }
+        .ov-sig { justify-content: center; overflow: hidden; }
+
+        /* ── Mobile overrides ── */
+        @media (max-width: 767px) {
             .app { flex-direction: column; }
-            .sidebar { width: 100%; min-width: 0; height: auto; position: static; }
+
+            .sidebar {
+                width: 100%; min-width: 0; height: auto;
+                position: static; padding: 16px;
+                box-shadow: none; border-bottom: 1px solid #e5e7eb;
+            }
+
+            .app-title { font-size: 18px; }
+
+            .main-area {
+                padding: 16px; gap: 16px;
+            }
+
+            .field-row-inputs { flex-direction: column; }
+            .field-row-inputs .pi { width: 100%; }
+
+            input.fi-input { font-size: 16px; /* prevent iOS zoom */ }
+        }
+
+        @media (min-width: 768px) {
+            /* Desktop: all steps open, no accordion toggle */
+            .step-header { cursor: default; }
+            .step-chevron { display: none; }
+            .step-body { display: block !important; }
+            .step { border: none; }
+            .step-header { padding: 12px 0 4px; }
         }
     </style>
 </head>
@@ -149,181 +266,244 @@
 
     <!-- ── SIDEBAR ── -->
     <div class="sidebar">
-        <h1>&#9998; PDF Signer</h1>
+        <div class="app-title">&#9998; PDF Signer</div>
 
-        <!-- 1. Upload -->
-        <div>
-            <h3>1 &#8212; Upload PDF</h3>
-            <div class="upload-zone" id="upload-zone" onclick="document.getElementById('file-input').click()">
-                <div class="upload-icon">&#128196;</div>
-                <p>Click or drag &amp; drop a PDF</p>
-                <p class="upload-hint">Any PDF document</p>
+        <!-- Step 1: Upload -->
+        <div class="step open" id="step-1">
+            <div class="step-header" onclick="toggleStep(1)">
+                <div class="step-num" id="snum-1">1</div>
+                <div class="step-title">Upload PDF</div>
+                <div class="step-summary" id="ssum-1"></div>
+                <div class="step-chevron">&#9660;</div>
             </div>
-            <input type="file" id="file-input" accept=".pdf" style="display:none" onchange="handleFile(this.files[0])">
-        </div>
-
-        <div class="divider"></div>
-
-        <!-- 2. Fields -->
-        <div>
-            <h3>2 &#8212; Fields &amp; Pages</h3>
-
-            <div class="spec-hint">
-                <strong>Pages column examples:</strong><br>
-                <code>all</code> &bull; <code>1-10</code> &bull; <code>1 to 10</code> &bull; <code>1,3,5</code> &bull;
-                <code>page 9</code> &bull; <code>9</code> &bull; <code>last page</code> &bull;
-                <code>all except 9</code> &bull; <code>all excluding page 9</code>
-            </div>
-
-            <div style="height:10px"></div>
-
-            <div class="col-headers">
-                <span class="col-h">Field</span>
-                <span class="col-h">Value</span>
-                <span class="col-h">Pages</span>
-            </div>
-
-            <!-- Initials -->
-            <div class="field-row">
-                <div class="field-label"><span class="dot" style="background:#4f46e5"></span>Initials</div>
-                <input class="vi" id="inp-initials" type="text" placeholder="e.g. J.L." maxlength="10" oninput="onValueChange('initials')">
-                <input class="si" id="spec-initials" type="text" placeholder="e.g. all" oninput="onSpecChange('initials')">
-            </div>
-
-            <!-- Full Name -->
-            <div class="field-row">
-                <div class="field-label"><span class="dot" style="background:#d97706"></span>Full Name</div>
-                <input class="vi" id="inp-name" type="text" placeholder="Full name" oninput="onValueChange('name')">
-                <input class="si" id="spec-name" type="text" placeholder="e.g. page 9" oninput="onSpecChange('name')">
-            </div>
-
-            <!-- Signature -->
-            <div class="field-row">
-                <div class="field-label"><span class="dot" style="background:#059669"></span>Signature</div>
-                <span class="sig-draw-label">&#8595; draw below</span>
-                <input class="si" id="spec-sig" type="text" placeholder="e.g. page 9" oninput="onSpecChange('signature')">
-            </div>
-
-            <!-- Date -->
-            <div class="field-row">
-                <div class="field-label"><span class="dot" style="background:#9333ea"></span>Date</div>
-                <input class="vi" id="inp-date" type="text" oninput="onValueChange('date')">
-                <input class="si" id="spec-date" type="text" placeholder="e.g. page 9" oninput="onSpecChange('date')">
-            </div>
-        </div>
-
-        <div class="divider"></div>
-
-        <!-- 3. Text Style -->
-        <div>
-            <h3>3 &#8212; Text Style</h3>
-            <div style="display:flex;gap:8px;align-items:flex-end">
-                <div style="flex:1">
-                    <div class="style-label">Font</div>
-                    <select id="sel-font" class="style-select" onchange="onFontChange()">
-                        <optgroup label="Helvetica">
-                            <option value="Helvetica_Normal" selected>Normal</option>
-                            <option value="Helvetica_Italic">Italic</option>
-                            <option value="Helvetica_Bold">Bold</option>
-                            <option value="Helvetica_BoldItalic">Bold Italic</option>
-                        </optgroup>
-                        <optgroup label="Times">
-                            <option value="Times_Normal">Normal</option>
-                            <option value="Times_Italic">Italic</option>
-                            <option value="Times_Bold">Bold</option>
-                            <option value="Times_BoldItalic">Bold Italic</option>
-                        </optgroup>
-                        <optgroup label="Courier">
-                            <option value="Courier_Normal">Normal</option>
-                            <option value="Courier_Italic">Italic</option>
-                            <option value="Courier_Bold">Bold</option>
-                            <option value="Courier_BoldItalic">Bold Italic</option>
-                        </optgroup>
-                    </select>
+            <div class="step-body">
+                <div class="upload-zone" id="upload-zone" onclick="document.getElementById('file-input').click()">
+                    <div class="upload-icon">&#128196;</div>
+                    <p>Tap to choose a PDF</p>
+                    <p class="upload-hint">or drag &amp; drop</p>
                 </div>
-                <div style="width:76px;flex-shrink:0">
-                    <div class="style-label">Size</div>
-                    <select id="sel-size" class="style-select" onchange="onSizeChange()">
-                        <option value="10">10 pt</option>
-                        <option value="11">11 pt</option>
-                        <option value="12" selected>12 pt</option>
-                        <option value="14">14 pt</option>
-                    </select>
+                <input type="file" id="file-input" accept=".pdf,application/pdf" style="display:none" onchange="handleFile(this.files[0])">
+            </div>
+        </div>
+
+        <!-- Step 2: Fields -->
+        <div class="step" id="step-2">
+            <div class="step-header" onclick="toggleStep(2)">
+                <div class="step-num locked" id="snum-2">2</div>
+                <div class="step-title">Fill In Details</div>
+                <div class="step-summary" id="ssum-2"></div>
+                <div class="step-chevron">&#9660;</div>
+            </div>
+            <div class="step-body">
+
+                <!-- Initials -->
+                <div class="field-card">
+                    <div class="field-card-header">
+                        <span class="dot" style="background:#4f46e5"></span>
+                        <span class="field-name">Initials</span>
+                    </div>
+                    <div class="field-row-inputs">
+                        <div class="fi">
+                            <label class="fi-label" for="inp-initials">Value</label>
+                            <input class="fi-input" id="inp-initials" type="text" placeholder="e.g. J.L." maxlength="10" oninput="onValueChange('initials')">
+                        </div>
+                        <div class="pi">
+                            <label class="fi-label">Pages</label>
+                            <div class="page-chips">
+                                <span class="chip" data-field="initials" data-spec="all" onclick="chipClick(this)">All</span>
+                                <span class="chip" data-field="initials" data-spec="last" onclick="chipClick(this)">Last</span>
+                                <span class="chip" data-field="initials" data-spec="__custom__" onclick="chipClick(this)">Custom</span>
+                            </div>
+                            <div class="custom-pages-wrap" id="cust-initials">
+                                <input class="fi-input" id="spec-initials" type="text" placeholder="e.g. 1,3,5 or 1-10" style="margin-top:4px;font-size:14px" oninput="onSpecChange('initials')">
+                            </div>
+                        </div>
+                    </div>
                 </div>
+
+                <!-- Full Name -->
+                <div class="field-card">
+                    <div class="field-card-header">
+                        <span class="dot" style="background:#d97706"></span>
+                        <span class="field-name">Full Name</span>
+                    </div>
+                    <div class="field-row-inputs">
+                        <div class="fi">
+                            <label class="fi-label" for="inp-name">Value</label>
+                            <input class="fi-input" id="inp-name" type="text" placeholder="Full name" oninput="onValueChange('name')">
+                        </div>
+                        <div class="pi">
+                            <label class="fi-label">Pages</label>
+                            <div class="page-chips">
+                                <span class="chip" data-field="name" data-spec="all" onclick="chipClick(this)">All</span>
+                                <span class="chip" data-field="name" data-spec="last" onclick="chipClick(this)">Last</span>
+                                <span class="chip" data-field="name" data-spec="__custom__" onclick="chipClick(this)">Custom</span>
+                            </div>
+                            <div class="custom-pages-wrap" id="cust-name">
+                                <input class="fi-input" id="spec-name" type="text" placeholder="e.g. page 9 or 1-5" style="margin-top:4px;font-size:14px" oninput="onSpecChange('name')">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Date -->
+                <div class="field-card">
+                    <div class="field-card-header">
+                        <span class="dot" style="background:#9333ea"></span>
+                        <span class="field-name">Date</span>
+                    </div>
+                    <div class="field-row-inputs">
+                        <div class="fi">
+                            <label class="fi-label" for="inp-date">Value</label>
+                            <input class="fi-input" id="inp-date" type="text" oninput="onValueChange('date')">
+                        </div>
+                        <div class="pi">
+                            <label class="fi-label">Pages</label>
+                            <div class="page-chips">
+                                <span class="chip" data-field="date" data-spec="all" onclick="chipClick(this)">All</span>
+                                <span class="chip" data-field="date" data-spec="last" onclick="chipClick(this)">Last</span>
+                                <span class="chip" data-field="date" data-spec="__custom__" onclick="chipClick(this)">Custom</span>
+                            </div>
+                            <div class="custom-pages-wrap" id="cust-date">
+                                <input class="fi-input" id="spec-date" type="text" placeholder="e.g. page 9 or 1-5" style="margin-top:4px;font-size:14px" oninput="onSpecChange('date')">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Text Style -->
+                <div class="field-card">
+                    <div class="field-card-header">
+                        <span style="font-size:15px">&#65Aa;</span>
+                        <span class="field-name">Text Style</span>
+                    </div>
+                    <div class="style-row">
+                        <div class="font-wrap">
+                            <label class="style-label" for="sel-font">Font</label>
+                            <select id="sel-font" class="style-select" onchange="onFontChange()">
+                                <optgroup label="Helvetica">
+                                    <option value="Helvetica_Normal" selected>Normal</option>
+                                    <option value="Helvetica_Italic">Italic</option>
+                                    <option value="Helvetica_Bold">Bold</option>
+                                    <option value="Helvetica_BoldItalic">Bold Italic</option>
+                                </optgroup>
+                                <optgroup label="Times">
+                                    <option value="Times_Normal">Normal</option>
+                                    <option value="Times_Italic">Italic</option>
+                                    <option value="Times_Bold">Bold</option>
+                                    <option value="Times_BoldItalic">Bold Italic</option>
+                                </optgroup>
+                                <optgroup label="Courier">
+                                    <option value="Courier_Normal">Normal</option>
+                                    <option value="Courier_Italic">Italic</option>
+                                    <option value="Courier_Bold">Bold</option>
+                                    <option value="Courier_BoldItalic">Bold Italic</option>
+                                </optgroup>
+                            </select>
+                        </div>
+                        <div class="size-wrap">
+                            <label class="style-label" for="sel-size">Size</label>
+                            <select id="sel-size" class="style-select" onchange="onSizeChange()">
+                                <option value="10">10 pt</option>
+                                <option value="11">11 pt</option>
+                                <option value="12" selected>12 pt</option>
+                                <option value="14">14 pt</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Signature -->
+                <div class="field-card">
+                    <div class="field-card-header">
+                        <span class="dot" style="background:#059669"></span>
+                        <span class="field-name">Signature</span>
+                    </div>
+                    <div>
+                        <label class="fi-label">Pages</label>
+                        <div class="page-chips">
+                            <span class="chip" data-field="signature" data-spec="all" onclick="chipClick(this)">All</span>
+                            <span class="chip" data-field="signature" data-spec="last" onclick="chipClick(this)">Last</span>
+                            <span class="chip" data-field="signature" data-spec="__custom__" onclick="chipClick(this)">Custom</span>
+                        </div>
+                        <div class="custom-pages-wrap" id="cust-signature">
+                            <input class="fi-input" id="spec-sig" type="text" placeholder="e.g. page 9 or 1-5" style="margin-top:4px;font-size:14px" oninput="onSpecChange('signature')">
+                        </div>
+                    </div>
+                    <div style="height:12px"></div>
+                    <label class="fi-label">Draw your signature</label>
+                    <div class="sig-wrap" id="sig-wrap">
+                        <canvas id="sig-canvas"></canvas>
+                        <div class="sig-hint" id="sig-hint">&#9998; Sign here — finger, stylus or mouse</div>
+                    </div>
+                    <div class="sig-actions">
+                        <span class="sig-status" id="sig-status">No signature yet</span>
+                        <button class="btn btn-ghost" style="font-size:13px;min-height:36px;padding:6px 12px" onclick="clearSig()">&#8635; Clear</button>
+                    </div>
+                </div>
+
             </div>
         </div>
 
-        <div class="divider"></div>
-
-        <!-- 4. Signature pad -->
-        <div>
-            <h3>4 &#8212; Draw Signature</h3>
-            <div class="sig-wrap">
-                <canvas id="sig-canvas" width="390" height="170"></canvas>
-                <div class="sig-hint" id="sig-hint">&#9998; Sign here &#8212; finger, stylus or mouse</div>
+        <!-- Step 3: Position & Generate -->
+        <div class="step" id="step-3">
+            <div class="step-header" onclick="toggleStep(3)">
+                <div class="step-num locked" id="snum-3">3</div>
+                <div class="step-title">Position &amp; Generate</div>
+                <div class="step-summary" id="ssum-3"></div>
+                <div class="step-chevron">&#9660;</div>
             </div>
-            <div style="height:8px"></div>
-            <button class="btn btn-ghost btn-sm" onclick="clearSig()">&#8635; Clear</button>
+            <div class="step-body">
+                <div class="legend">
+                    <span style="color:#4f46e5;font-weight:700">&#9632;</span> Blue = Initials &nbsp;
+                    <span style="color:#059669;font-weight:700">&#9632;</span> Green = Signature<br>
+                    <span style="color:#d97706;font-weight:700">&#9632;</span> Orange = Full Name &nbsp;
+                    <span style="color:#9333ea;font-weight:700">&#9632;</span> Purple = Date<br>
+                    <span style="color:#555">Drag any coloured box on the page to reposition it. Each page keeps its own position.</span>
+                </div>
+                <button class="btn btn-primary" id="gen-btn" onclick="generatePDF()" disabled>Open / Save Signed PDF</button>
+            </div>
         </div>
 
-        <div class="divider"></div>
+    </div><!-- end sidebar -->
 
-        <!-- 5. Position + Generate -->
-        <div>
-            <h3>5 &#8212; Position &amp; Generate</h3>
-            <div class="legend">
-                Drag any coloured box on the pages to reposition it.<br>
-                Each page keeps its own position, so you can place a field differently on every page.<br><br>
-                <span style="color:#4f46e5;font-weight:700">&#9632;</span> Blue = Initials &nbsp;
-                <span style="color:#059669;font-weight:700">&#9632;</span> Green = Signature<br>
-                <span style="color:#d97706;font-weight:700">&#9632;</span> Orange = Full Name &nbsp;
-                <span style="color:#9333ea;font-weight:700">&#9632;</span> Purple = Date
-            </div>
-            <div style="height:12px"></div>
-            <button class="btn btn-primary" id="gen-btn" onclick="generatePDF()" disabled>&#8595; Generate Signed PDF</button>
-        </div>
-    </div>
-
-    <!-- ── MAIN ── -->
-    <div class="main" id="main">
+    <!-- ── MAIN PDF AREA ── -->
+    <div class="main-area" id="main">
         <div class="empty-state">
             <div class="empty-icon">&#128196;</div>
             <p>Upload a PDF to get started</p>
         </div>
     </div>
-</div>
+
+</div><!-- end app -->
 
 <script>
 pdfjsLib.GlobalWorkerOptions.workerSrc =
     "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
 
-const SCALE = 1.3;
-
 // ── Font options ──────────────────────────────────────────────────────────────
-// std  → pdf-lib StandardFonts key (no network needed)
-// fetch → CDN URL for a TTF to embed (Calibri uses open-source Carlito)
-// fallback → StandardFonts key used when fetch fails
 const FONT_DEFS = {
-    Helvetica_Normal:     { std:"Helvetica",            css:{ family:"Helvetica,Arial,sans-serif",              style:"normal", weight:"normal" } },
-    Helvetica_Italic:     { std:"HelveticaOblique",     css:{ family:"Helvetica,Arial,sans-serif",              style:"italic", weight:"normal" } },
-    Helvetica_Bold:       { std:"HelveticaBold",        css:{ family:"Helvetica,Arial,sans-serif",              style:"normal", weight:"bold"   } },
-    Helvetica_BoldItalic: { std:"HelveticaBoldOblique", css:{ family:"Helvetica,Arial,sans-serif",              style:"italic", weight:"bold"   } },
-    Times_Normal:         { std:"TimesRoman",           css:{ family:'"Times New Roman",Times,serif',           style:"normal", weight:"normal" } },
-    Times_Italic:         { std:"TimesRomanItalic",     css:{ family:'"Times New Roman",Times,serif',           style:"italic", weight:"normal" } },
-    Times_Bold:           { std:"TimesRomanBold",       css:{ family:'"Times New Roman",Times,serif',           style:"normal", weight:"bold"   } },
-    Times_BoldItalic:     { std:"TimesRomanBoldItalic", css:{ family:'"Times New Roman",Times,serif',           style:"italic", weight:"bold"   } },
-    Courier_Normal:       { std:"Courier",              css:{ family:'"Courier New",Courier,monospace',         style:"normal", weight:"normal" } },
-    Courier_Italic:       { std:"CourierOblique",       css:{ family:'"Courier New",Courier,monospace',         style:"italic", weight:"normal" } },
-    Courier_Bold:         { std:"CourierBold",          css:{ family:'"Courier New",Courier,monospace',         style:"normal", weight:"bold"   } },
-    Courier_BoldItalic:   { std:"CourierBoldOblique",   css:{ family:'"Courier New",Courier,monospace',         style:"italic", weight:"bold"   } },
+    Helvetica_Normal:     { std:"Helvetica",            css:{ family:"Helvetica,Arial,sans-serif",       style:"normal", weight:"normal" } },
+    Helvetica_Italic:     { std:"HelveticaOblique",     css:{ family:"Helvetica,Arial,sans-serif",       style:"italic", weight:"normal" } },
+    Helvetica_Bold:       { std:"HelveticaBold",        css:{ family:"Helvetica,Arial,sans-serif",       style:"normal", weight:"bold"   } },
+    Helvetica_BoldItalic: { std:"HelveticaBoldOblique", css:{ family:"Helvetica,Arial,sans-serif",       style:"italic", weight:"bold"   } },
+    Times_Normal:         { std:"TimesRoman",           css:{ family:'"Times New Roman",Times,serif',    style:"normal", weight:"normal" } },
+    Times_Italic:         { std:"TimesRomanItalic",     css:{ family:'"Times New Roman",Times,serif',    style:"italic", weight:"normal" } },
+    Times_Bold:           { std:"TimesRomanBold",       css:{ family:'"Times New Roman",Times,serif',    style:"normal", weight:"bold"   } },
+    Times_BoldItalic:     { std:"TimesRomanBoldItalic", css:{ family:'"Times New Roman",Times,serif',    style:"italic", weight:"bold"   } },
+    Courier_Normal:       { std:"Courier",              css:{ family:'"Courier New",Courier,monospace',  style:"normal", weight:"normal" } },
+    Courier_Italic:       { std:"CourierOblique",       css:{ family:'"Courier New",Courier,monospace',  style:"italic", weight:"normal" } },
+    Courier_Bold:         { std:"CourierBold",          css:{ family:'"Courier New",Courier,monospace',  style:"normal", weight:"bold"   } },
+    Courier_BoldItalic:   { std:"CourierBoldOblique",   css:{ family:'"Courier New",Courier,monospace',  style:"italic", weight:"bold"   } },
 };
 
 // ── State ─────────────────────────────────────────────────────────────────────
-let pdfFileBytes = null;       // Uint8Array, kept intact for pdf-lib
+let pdfFileBytes  = null;
 let uploadedName  = "document";
 let totalPages    = 0;
-let renderedPages = {};        // { pageNum: { canvas, viewport, wrapper } }
-let sigPad        = null;
+let renderedPages = {};
+let sigPad           = null;
+let pdfScale         = 1.3;
 let selectedFontKey  = "Helvetica_Normal";
 let selectedFontSize = 12;
 
@@ -332,30 +512,17 @@ let selectedFontSize = 12;
 // `positions` (keyed by page number) so dragging a box on one page no longer
 // moves it on every other page.
 const fields = {
-    initials:  { id:"initials",  label:"Initials",   type:"text", inputId:"inp-initials", specId:"spec-initials", color:"#4f46e5", xFrac:0.87, yFrac:0.93,                         overlays:{}, pages:new Set(), positions:{} },
-    name:      { id:"name",      label:"Full Name",  type:"text", inputId:"inp-name",     specId:"spec-name",     color:"#d97706", xFrac:0.08, yFrac:0.68,                         overlays:{}, pages:new Set(), positions:{} },
-    signature: { id:"signature", label:"Signature",  type:"sig",  inputId:null,           specId:"spec-sig",      color:"#059669", xFrac:0.08, yFrac:0.55, wFrac:0.21, hFrac:0.07, overlays:{}, pages:new Set(), positions:{} },
-    date:      { id:"date",      label:"Date",       type:"text", inputId:"inp-date",     specId:"spec-date",     color:"#9333ea", xFrac:0.08, yFrac:0.78,                         overlays:{}, pages:new Set(), positions:{} },
+    initials:  { id:"initials",  label:"Initials",  type:"text", inputId:"inp-initials", specId:"spec-initials", color:"#4f46e5", xFrac:0.87, yFrac:0.93,                         overlays:{}, pages:new Set(), positions:{} },
+    name:      { id:"name",      label:"Full Name", type:"text", inputId:"inp-name",     specId:"spec-name",     color:"#d97706", xFrac:0.08, yFrac:0.68,                         overlays:{}, pages:new Set(), positions:{} },
+    signature: { id:"signature", label:"Signature", type:"sig",  inputId:null,           specId:"spec-sig",      color:"#059669", xFrac:0.08, yFrac:0.55, wFrac:0.30, hFrac:0.07, overlays:{}, pages:new Set(), positions:{} },
+    date:      { id:"date",      label:"Date",      type:"text", inputId:"inp-date",     specId:"spec-date",     color:"#9333ea", xFrac:0.08, yFrac:0.78,                         overlays:{}, pages:new Set(), positions:{} },
 };
 
 // ── Boot ──────────────────────────────────────────────────────────────────────
 document.addEventListener("DOMContentLoaded", () => {
-    // Signature pad
-    const canvas = document.getElementById("sig-canvas");
-    sigPad = new SignaturePad(canvas, {
-        backgroundColor: "rgba(0,0,0,0)",
-        penColor: "#111",
-        minWidth: 0.5, maxWidth: 2,
-    });
-    sigPad.addEventListener("beginStroke", () => {
-        document.getElementById("sig-hint").style.display = "none";
-    });
-    sigPad.addEventListener("endStroke", updateSigPreviews);
-
-    // Pre-fill today's date
+    initSigPad();
     document.getElementById("inp-date").value = new Date().toLocaleDateString("en-GB");
 
-    // Drag & drop on upload zone
     const zone = document.getElementById("upload-zone");
     zone.addEventListener("dragover",  e => { e.preventDefault(); zone.classList.add("drag-over"); });
     zone.addEventListener("dragleave", () => zone.classList.remove("drag-over"));
@@ -364,7 +531,59 @@ document.addEventListener("DOMContentLoaded", () => {
         const f = e.dataTransfer.files[0];
         if (f && f.type === "application/pdf") handleFile(f);
     });
+
+    window.addEventListener("resize", debounce(onResize, 300));
 });
+
+function initSigPad() {
+    const canvas = document.getElementById("sig-canvas");
+    const wrap   = document.getElementById("sig-wrap");
+    const ratio  = window.devicePixelRatio || 1;
+    const w = wrap.clientWidth || 340;
+    const h = Math.round(Math.min(180, Math.max(130, w * 0.38)));
+
+    canvas.width  = w * ratio;
+    canvas.height = h * ratio;
+    canvas.style.width  = w + "px";
+    canvas.style.height = h + "px";
+    canvas.getContext("2d").scale(ratio, ratio);
+
+    if (sigPad) {
+        const data = sigPad.toData();
+        sigPad.off();
+        sigPad = null;
+        sigPad = new SignaturePad(canvas, { backgroundColor: "rgba(0,0,0,0)", penColor: "#111", minWidth: 0.8, maxWidth: 2.5 });
+        sigPad.fromData(data);
+    } else {
+        sigPad = new SignaturePad(canvas, { backgroundColor: "rgba(0,0,0,0)", penColor: "#111", minWidth: 0.8, maxWidth: 2.5 });
+    }
+
+    sigPad.addEventListener("beginStroke", () => {
+        document.getElementById("sig-hint").style.display = "none";
+    });
+    sigPad.addEventListener("endStroke", () => {
+        updateSigPreviews();
+        setSigStatus(true);
+    });
+}
+
+function setSigStatus(hasSig) {
+    const el = document.getElementById("sig-status");
+    el.textContent = hasSig ? "✓ Signature ready" : "No signature yet";
+    el.className   = "sig-status" + (hasSig ? " has-sig" : "");
+}
+
+// ── Accordion ─────────────────────────────────────────────────────────────────
+function toggleStep(n) {
+    if (window.innerWidth >= 768) return; // desktop: always open
+    const el = document.getElementById("step-" + n);
+    el.classList.toggle("open");
+}
+
+function openStep(n) {
+    if (window.innerWidth >= 768) return;
+    document.getElementById("step-" + n).classList.add("open");
+}
 
 // ── File upload ───────────────────────────────────────────────────────────────
 function handleFile(file) {
@@ -374,42 +593,62 @@ function handleFile(file) {
     reader.onload = async e => {
         pdfFileBytes = new Uint8Array(e.target.result);
 
-        // Update upload zone UI
         const zone = document.getElementById("upload-zone");
         zone.style.cssText = "padding:0;border:none;cursor:default;background:transparent";
         zone.onclick = null;
         zone.innerHTML = `<div class="file-loaded">
-            <span style="font-size:22px">&#128196;</span>
+            <span style="font-size:24px">&#128196;</span>
             <div style="flex:1;overflow:hidden">
-                <div class="fname">${file.name}</div>
+                <div class="fname">${escHtml(file.name)}</div>
                 <div class="fmeta" id="fmeta">Loading&hellip;</div>
             </div>
-            <button class="btn btn-ghost btn-sm" onclick="document.getElementById('file-input').click()">Replace</button>
+            <button class="btn btn-ghost" style="font-size:12px;min-height:36px;padding:6px 12px;flex-shrink:0" onclick="document.getElementById('file-input').click()">Replace</button>
         </div>`;
+
+        document.getElementById("snum-1").className = "step-num done";
+        document.getElementById("ssum-1").textContent = escHtml(file.name.length > 22 ? file.name.slice(0,20)+"…" : file.name);
+
+        // Unlock steps 2 & 3
+        document.getElementById("snum-2").className = "step-num";
+        document.getElementById("snum-3").className = "step-num";
 
         await renderPDF();
         document.getElementById("gen-btn").disabled = false;
+        openStep(2);
     };
     reader.readAsArrayBuffer(file);
 }
 
 // ── PDF rendering ─────────────────────────────────────────────────────────────
+// The scale is calibrated against the actual first page's own (rotation-aware)
+// width, not a hardcoded page size — a hardcoded assumption breaks down for
+// landscape or non-A4 pages, causing the rendered box to be wider than the
+// available space and get squeezed by the max-width:100% CSS safety net below,
+// which desyncs on-screen drag positions from what gets exported.
+let naturalPageWidth = 595; // fallback until the real PDF is loaded
+function calcScale() {
+    const mainW = document.getElementById("main").clientWidth - 48;
+    return Math.min(1.6, Math.max(0.6, mainW / naturalPageWidth));
+}
+
 async function renderPDF() {
-    // Reset
     document.getElementById("main").innerHTML = "";
     renderedPages = {};
-    // Note: positions are intentionally NOT reset here — they persist across
-    // re-renders (e.g. replacing the file or, on mobile, resizing/rotating the
-    // device) so a user's manual placement on a given page isn't lost.
     for (const f of Object.values(fields)) { f.overlays = {}; f.pages = new Set(); }
 
     const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(pdfFileBytes) }).promise;
     totalPages = pdf.numPages;
     document.getElementById("fmeta").textContent = `${totalPages} page${totalPages > 1 ? "s" : ""}`;
 
+    // getViewport({ scale: 1 }) already accounts for the page's /Rotate flag,
+    // so this is the true on-screen width/height ratio for page 1.
+    const firstPage  = await pdf.getPage(1);
+    naturalPageWidth = firstPage.getViewport({ scale: 1 }).width;
+    pdfScale = calcScale();
+
     for (let n = 1; n <= totalPages; n++) {
         const page = await pdf.getPage(n);
-        const vp   = page.getViewport({ scale: SCALE });
+        const vp   = page.getViewport({ scale: pdfScale });
 
         const wrap = document.createElement("div");
         wrap.className = "canvas-wrap";
@@ -419,6 +658,8 @@ async function renderPDF() {
         const canvas = document.createElement("canvas");
         canvas.width  = vp.width;
         canvas.height = vp.height;
+        canvas.style.width  = vp.width  + "px";
+        canvas.style.height = vp.height + "px";
         wrap.appendChild(canvas);
         await page.render({ canvasContext: canvas.getContext("2d"), viewport: vp }).promise;
 
@@ -434,16 +675,53 @@ async function renderPDF() {
         document.getElementById("main").appendChild(grp);
     }
 
-    // Re-apply any existing page specs (after replacing a file)
     for (const fid of Object.keys(fields)) {
         if (document.getElementById(fields[fid].specId).value) applyPageSpec(fid);
     }
 }
 
+async function onResize() {
+    if (!pdfFileBytes) return;
+    const newScale = calcScale();
+    if (Math.abs(newScale - pdfScale) > 0.05) {
+        // Save page specs, re-render, restore
+        const specs = {};
+        for (const fid of Object.keys(fields)) specs[fid] = document.getElementById(fields[fid].specId).value;
+        await renderPDF();
+        for (const fid of Object.keys(fields)) {
+            document.getElementById(fields[fid].specId).value = specs[fid];
+            if (specs[fid]) applyPageSpec(fid);
+        }
+    }
+    initSigPad();
+}
+
+// ── Chip page selector ─────────────────────────────────────────────────────────
+function chipClick(chip) {
+    const fieldId = chip.dataset.field;
+    const spec    = chip.dataset.spec;
+
+    // Toggle active on siblings
+    chip.closest(".page-chips").querySelectorAll(".chip").forEach(c => c.classList.remove("active"));
+    const custWrap = document.getElementById("cust-" + fieldId);
+
+    if (spec === "__custom__") {
+        chip.classList.add("active");
+        custWrap.classList.add("show");
+        document.getElementById(fields[fieldId].specId).focus();
+        return;
+    }
+
+    chip.classList.toggle("active"); // second tap deselects
+    custWrap.classList.remove("show");
+    document.getElementById(fields[fieldId].specId).value = chip.classList.contains("active") ? spec : "";
+    onSpecChange(fieldId);
+}
+
 // ── Value live-update ─────────────────────────────────────────────────────────
 function onValueChange(fieldId) {
     const field = fields[fieldId];
-    const val = document.getElementById(field.inputId).value || field.label;
+    const val   = document.getElementById(field.inputId).value || field.label;
     for (const ov of Object.values(field.overlays)) {
         const t = ov.querySelector(".ov-text");
         if (t) t.textContent = val;
@@ -451,10 +729,10 @@ function onValueChange(fieldId) {
 }
 
 // ── Page spec ─────────────────────────────────────────────────────────────────
-const _debounce = {};
+const _deb = {};
 function onSpecChange(fieldId) {
-    clearTimeout(_debounce[fieldId]);
-    _debounce[fieldId] = setTimeout(() => applyPageSpec(fieldId), 350);
+    clearTimeout(_deb[fieldId]);
+    _deb[fieldId] = setTimeout(() => applyPageSpec(fieldId), 350);
 }
 
 function applyPageSpec(fieldId) {
@@ -463,14 +741,9 @@ function applyPageSpec(fieldId) {
     const specText = document.getElementById(field.specId).value;
     const newPages = parsePageSpec(specText, totalPages);
 
-    // Remove stale overlays
     for (const pn of Object.keys(field.overlays)) {
-        if (!newPages.has(+pn)) {
-            field.overlays[pn].remove();
-            delete field.overlays[pn];
-        }
+        if (!newPages.has(+pn)) { field.overlays[pn].remove(); delete field.overlays[pn]; }
     }
-    // Add new overlays
     for (const pn of newPages) {
         if (!field.overlays[pn]) addOverlay(fieldId, pn);
     }
@@ -482,7 +755,6 @@ function addOverlay(fieldId, pageNum) {
     const field = fields[fieldId];
     const info  = renderedPages[pageNum];
     if (!info) return;
-
     const { wrapper } = info;
     // Each page keeps its own remembered position; first time round it falls
     // back to the field's default, and that gets captured for future re-renders.
@@ -507,7 +779,7 @@ function addOverlay(fieldId, pageNum) {
         }
     } else {
         const val = field.inputId ? (document.getElementById(field.inputId).value || field.label) : field.label;
-        ov.innerHTML = `&#9783; <span class="ov-text">${val}</span>`;
+        ov.innerHTML = `&#9783; <span class="ov-text">${escHtml(val)}</span>`;
     }
 
     makeDraggable(ov, wrapper, fieldId, pageNum);
@@ -519,6 +791,7 @@ function addOverlay(fieldId, pageNum) {
 function clearSig() {
     sigPad.clear();
     document.getElementById("sig-hint").style.display = "flex";
+    setSigStatus(false);
     for (const ov of Object.values(fields.signature.overlays)) {
         ov.style.padding  = "";
         ov.style.overflow = "";
@@ -536,14 +809,10 @@ function updateSigPreviews() {
     }
 }
 
-// ── Drag & drop (mouse + touch, independent per page) ──────────────────────────
+// ── Draggable overlays (independent per page) ──────────────────────────────────
 function makeDraggable(el, container, fieldId, pageNum) {
     let sx, sy, sl, st;
-
-    function coord(e) {
-        const t = e.touches ? e.touches[0] : e;
-        return { x: t.clientX, y: t.clientY };
-    }
+    function coord(e) { const t = e.touches ? e.touches[0] : e; return { x: t.clientX, y: t.clientY }; }
     function start(e) {
         e.preventDefault(); e.stopPropagation();
         const c = coord(e);
@@ -558,17 +827,14 @@ function makeDraggable(el, container, fieldId, pageNum) {
     function move(e) {
         e.preventDefault();
         const c = coord(e);
-        let nl = Math.max(0, Math.min(sl + (c.x - sx), container.offsetWidth  - el.offsetWidth));
-        let nt = Math.max(0, Math.min(st + (c.y - sy), container.offsetHeight - el.offsetHeight));
-        el.style.left = nl + "px";
-        el.style.top  = nt + "px";
+        el.style.left = Math.max(0, Math.min(sl + (c.x - sx), container.offsetWidth  - el.offsetWidth))  + "px";
+        el.style.top  = Math.max(0, Math.min(st + (c.y - sy), container.offsetHeight - el.offsetHeight)) + "px";
     }
     function end() {
         document.removeEventListener("mousemove", move);
         document.removeEventListener("mouseup",   end);
         document.removeEventListener("touchmove", move);
         document.removeEventListener("touchend",  end);
-
         if (!fieldId || !pageNum) return;
         const field = fields[fieldId];
         // Save this page's position only — other pages for the same field are
@@ -586,18 +852,9 @@ function makeDraggable(el, container, fieldId, pageNum) {
 function parsePageSpec(spec, total) {
     if (!spec || !spec.trim()) return new Set();
     spec = spec.trim().toLowerCase();
-
-    // all / all pages / *
-    if (/^(all(\s+pages?)?|\*)$/.test(spec))
-        return new Set(Array.from({ length: total }, (_, i) => i + 1));
-
-    // last page / last
+    if (/^(all(\s+pages?)?|\*)$/.test(spec)) return new Set(Array.from({ length: total }, (_, i) => i + 1));
     if (/^last(\s+page)?$/.test(spec)) return new Set([total]);
-
-    // first page / first
     if (/^first(\s+page)?$/.test(spec)) return new Set([1]);
-
-    // all [pages] excluding/except/but <spec>
     const exclM = spec.match(/^all(?:\s+pages?)?\s+(?:excluding|except|but)\s+(.+)$/);
     if (exclM) {
         const excl = parsePageSpec(exclM[1], total);
@@ -605,22 +862,14 @@ function parsePageSpec(spec, total) {
         excl.forEach(p => all.delete(p));
         return all;
     }
-
-    // comma/semicolon-separated parts
     const pages = new Set();
     for (let part of spec.split(/[,;]+/)) {
         part = part.trim().replace(/^pages?\s+/, "").replace(/\s+pages?$/, "");
         if (!part) continue;
         if (part === "last")  { pages.add(total); continue; }
         if (part === "first") { pages.add(1);     continue; }
-
-        // range: "1-10" or "1 to 10"
         const rng = part.match(/^(\d+)\s*(?:-|to)\s*(\d+)$/);
-        if (rng) {
-            for (let i = Math.max(1, +rng[1]); i <= Math.min(total, +rng[2]); i++) pages.add(i);
-            continue;
-        }
-        // single number
+        if (rng) { for (let i = Math.max(1,+rng[1]); i <= Math.min(total,+rng[2]); i++) pages.add(i); continue; }
         const n = +part;
         if (Number.isInteger(n) && n >= 1 && n <= total) pages.add(n);
     }
@@ -650,7 +899,6 @@ function updateOverlayStyles() {
         }
     }
 }
-
 
 // ── Rotation-aware coordinate mapping ───────────────────────────────────────────
 // PDF pages can carry a /Rotate flag (0/90/180/270) that tells viewers to rotate
@@ -715,27 +963,18 @@ function containFit(boxW, boxH, imgAspect) {
 // ── PDF generation ────────────────────────────────────────────────────────────
 async function generatePDF() {
     if (!pdfFileBytes) { alert("Please upload a PDF first."); return; }
-    if (!Object.values(fields).some(f => f.pages.size > 0))
-        { alert("Specify pages for at least one field."); return; }
-    if (fields.signature.pages.size > 0 && sigPad.isEmpty())
-        { alert("Signature field has pages set but no signature drawn."); return; }
+    if (!Object.values(fields).some(f => f.pages.size > 0)) { alert("Select pages for at least one field."); return; }
+    if (fields.signature.pages.size > 0 && sigPad.isEmpty()) { alert("Signature pages are set but no signature was drawn."); return; }
 
     const btn = document.getElementById("gen-btn");
     btn.disabled = true;
-    btn.textContent = "&#9203; Generating…";
+    btn.textContent = "⏳ Generating…";
 
     try {
-        // Fresh copy so PDF.js worker detach doesn't affect us
-        const freshBytes = new Uint8Array(pdfFileBytes);
-        const pdfDoc = await PDFLib.PDFDocument.load(freshBytes, {
-            ignoreEncryption: true,
-            throwOnInvalidObject: false,
-        });
-
+        const pdfDoc   = await PDFLib.PDFDocument.load(new Uint8Array(pdfFileBytes), { ignoreEncryption: true, throwOnInvalidObject: false });
         const fontDef = FONT_DEFS[selectedFontKey] || FONT_DEFS.Helvetica_Normal;
-        const font = await pdfDoc.embedFont(PDFLib.StandardFonts[fontDef.std]);
+        const font    = await pdfDoc.embedFont(PDFLib.StandardFonts[fontDef.std]);
 
-        // Embed signature once if needed
         let sigImg = null;
         if (fields.signature.pages.size > 0 && !sigPad.isEmpty()) {
             const b64 = sigPad.toDataURL("image/png").split(",")[1];
@@ -746,11 +985,10 @@ async function generatePDF() {
         }
 
         const pdfPages = pdfDoc.getPages();
-
         for (let i = 0; i < pdfPages.length; i++) {
-            const page   = pdfPages[i];
-            const pn     = i + 1;
-            const info   = renderedPages[pn];
+            const page = pdfPages[i];
+            const pn   = i + 1;
+            const info = renderedPages[pn];
             if (!info) continue;
             const { viewport: vp, wrapper } = info;
 
@@ -767,11 +1005,8 @@ async function generatePDF() {
                 if (!field.pages.has(pn)) continue;
                 const ov = field.overlays[pn];
                 if (!ov) continue;
-
-                const ox = parseInt(ov.style.left)  * scaleX;
-                const oy = parseInt(ov.style.top)   * scaleY;
-                const ow = ov.offsetWidth  * scaleX;
-                const oh = ov.offsetHeight * scaleY;
+                const ox = parseInt(ov.style.left) * scaleX, oy = parseInt(ov.style.top) * scaleY;
+                const ow = ov.offsetWidth * scaleX,          oh = ov.offsetHeight * scaleY;
 
                 if (field.type === "sig" && sigImg) {
                     const m = mapOverlayToPdfSpace(vp, ox, oy, ow, oh, 0);
@@ -781,22 +1016,12 @@ async function generatePDF() {
                     const rad = m.rotate * Math.PI / 180;
                     const dx  = fit.dx * Math.cos(rad) - fit.dy * Math.sin(rad);
                     const dy  = fit.dx * Math.sin(rad) + fit.dy * Math.cos(rad);
-                    page.drawImage(sigImg, {
-                        x: m.x + dx, y: m.y + dy,
-                        width: fit.w, height: fit.h,
-                        rotate: PDFLib.degrees(m.rotate),
-                    });
+                    page.drawImage(sigImg, { x: m.x + dx, y: m.y + dy, width: fit.w, height: fit.h, rotate: PDFLib.degrees(m.rotate) });
                 } else if (field.type === "text" && field.inputId) {
                     const val = document.getElementById(field.inputId).value.trim();
                     if (!val) continue;
                     const m = mapOverlayToPdfSpace(vp, ox, oy, ow, oh, 2);
-                    page.drawText(val, {
-                        x: m.x, y: m.y,
-                        size:  selectedFontSize,
-                        font:  font,
-                        color: PDFLib.rgb(0, 0, 0),
-                        rotate: PDFLib.degrees(m.rotate),
-                    });
+                    page.drawText(val, { x: m.x, y: m.y, size: selectedFontSize, font, color: PDFLib.rgb(0,0,0), rotate: PDFLib.degrees(m.rotate) });
                 }
             }
         }
@@ -804,23 +1029,41 @@ async function generatePDF() {
         const out  = await pdfDoc.save();
         const blob = new Blob([out], { type: "application/pdf" });
         const url  = URL.createObjectURL(blob);
-        const a    = document.createElement("a");
-        a.href = url;
-        a.download = uploadedName + " - signed.pdf";
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
 
-        btn.textContent = "&#10003; Downloaded!";
-        setTimeout(() => { btn.disabled = false; btn.textContent = "↓ Generate Signed PDF"; }, 4000);
+        // iOS Safari silently drops anchor.click() downloads — open in new tab so
+        // the user can tap Share → Save to Files from the PDF viewer.
+        if (/iP(hone|ad|od)/.test(navigator.userAgent)) {
+            window.open(url, "_blank");
+            btn.textContent = "✓ Tap Share → Save to Files";
+        } else {
+            const a = document.createElement("a");
+            a.href = url; a.download = uploadedName + " - signed.pdf";
+            document.body.appendChild(a); a.click();
+            document.body.removeChild(a); URL.revokeObjectURL(url);
+            btn.textContent = "✓ Downloaded!";
+        }
+        setTimeout(() => { btn.disabled = false; btn.textContent = "Open / Save Signed PDF"; }, 5000);
 
     } catch (err) {
         console.error(err);
         alert("Error: " + err.message);
         btn.disabled = false;
-        btn.textContent = "↓ Generate Signed PDF";
+        btn.textContent = "Open / Save Signed PDF";
     }
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+function escHtml(s) {
+    return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+}
+
+function debounce(fn, ms) {
+    let t; return (...args) => { clearTimeout(t); t = setTimeout(() => fn(...args), ms); };
+}
+</script>
+<script>
+if ("serviceWorker" in navigator) {
+    navigator.serviceWorker.register("./sw.js").catch(() => {});
 }
 </script>
 </body>
