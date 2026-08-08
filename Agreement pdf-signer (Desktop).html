@@ -214,24 +214,17 @@
                 <div style="flex:1">
                     <div class="style-label">Font</div>
                     <select id="sel-font" class="style-select" onchange="onFontChange()">
-                        <optgroup label="Helvetica">
-                            <option value="Helvetica_Normal" selected>Normal</option>
-                            <option value="Helvetica_Italic">Italic</option>
-                            <option value="Helvetica_Bold">Bold</option>
-                            <option value="Helvetica_BoldItalic">Bold Italic</option>
-                        </optgroup>
-                        <optgroup label="Times">
-                            <option value="Times_Normal">Normal</option>
-                            <option value="Times_Italic">Italic</option>
-                            <option value="Times_Bold">Bold</option>
-                            <option value="Times_BoldItalic">Bold Italic</option>
-                        </optgroup>
-                        <optgroup label="Courier">
-                            <option value="Courier_Normal">Normal</option>
-                            <option value="Courier_Italic">Italic</option>
-                            <option value="Courier_Bold">Bold</option>
-                            <option value="Courier_BoldItalic">Bold Italic</option>
-                        </optgroup>
+                        <option value="Helvetica" selected>Helvetica</option>
+                        <option value="HelveticaBold">Helvetica Bold</option>
+                        <option value="HelveticaOblique">Helvetica Oblique</option>
+                        <option value="TimesRoman">Times Roman</option>
+                        <option value="TimesRomanBold">Times Bold</option>
+                        <option value="TimesRomanItalic">Times Italic</option>
+                        <option value="TimesRomanBoldItalic">Times Bold Italic</option>
+                        <option value="Courier">Courier</option>
+                        <option value="CourierBold">Courier Bold</option>
+                        <option value="CourierOblique">Courier Oblique</option>
+                        
                     </select>
                 </div>
                 <div style="width:76px;flex-shrink:0">
@@ -252,7 +245,7 @@
         <div>
             <h3>4 &#8212; Draw Signature</h3>
             <div class="sig-wrap">
-                <canvas id="sig-canvas" width="390" height="170"></canvas>
+                <canvas id="sig-canvas" width="340" height="170"></canvas>
                 <div class="sig-hint" id="sig-hint">&#9998; Sign here &#8212; finger, stylus or mouse</div>
             </div>
             <div style="height:8px"></div>
@@ -293,22 +286,17 @@ pdfjsLib.GlobalWorkerOptions.workerSrc =
 const SCALE = 1.3;
 
 // ── Font options ──────────────────────────────────────────────────────────────
-// std  → pdf-lib StandardFonts key (no network needed)
-// fetch → CDN URL for a TTF to embed (Calibri uses open-source Carlito)
-// fallback → StandardFonts key used when fetch fails
-const FONT_DEFS = {
-    Helvetica_Normal:     { std:"Helvetica",            css:{ family:"Helvetica,Arial,sans-serif",              style:"normal", weight:"normal" } },
-    Helvetica_Italic:     { std:"HelveticaOblique",     css:{ family:"Helvetica,Arial,sans-serif",              style:"italic", weight:"normal" } },
-    Helvetica_Bold:       { std:"HelveticaBold",        css:{ family:"Helvetica,Arial,sans-serif",              style:"normal", weight:"bold"   } },
-    Helvetica_BoldItalic: { std:"HelveticaBoldOblique", css:{ family:"Helvetica,Arial,sans-serif",              style:"italic", weight:"bold"   } },
-    Times_Normal:         { std:"TimesRoman",           css:{ family:'"Times New Roman",Times,serif',           style:"normal", weight:"normal" } },
-    Times_Italic:         { std:"TimesRomanItalic",     css:{ family:'"Times New Roman",Times,serif',           style:"italic", weight:"normal" } },
-    Times_Bold:           { std:"TimesRomanBold",       css:{ family:'"Times New Roman",Times,serif',           style:"normal", weight:"bold"   } },
-    Times_BoldItalic:     { std:"TimesRomanBoldItalic", css:{ family:'"Times New Roman",Times,serif',           style:"italic", weight:"bold"   } },
-    Courier_Normal:       { std:"Courier",              css:{ family:'"Courier New",Courier,monospace',         style:"normal", weight:"normal" } },
-    Courier_Italic:       { std:"CourierOblique",       css:{ family:'"Courier New",Courier,monospace',         style:"italic", weight:"normal" } },
-    Courier_Bold:         { std:"CourierBold",          css:{ family:'"Courier New",Courier,monospace',         style:"normal", weight:"bold"   } },
-    Courier_BoldItalic:   { std:"CourierBoldOblique",   css:{ family:'"Courier New",Courier,monospace',         style:"italic", weight:"bold"   } },
+const FONT_CSS = {
+    Helvetica:             { family:"sans-serif",  style:"normal",  weight:"normal" },
+    HelveticaBold:         { family:"sans-serif",  style:"normal",  weight:"bold"   },
+    HelveticaOblique:      { family:"sans-serif",  style:"italic",  weight:"normal" },
+    TimesRoman:            { family:"serif",        style:"normal",  weight:"normal" },
+    TimesRomanBold:        { family:"serif",        style:"normal",  weight:"bold"   },
+    TimesRomanItalic:      { family:"serif",        style:"italic",  weight:"normal" },
+    TimesRomanBoldItalic:  { family:"serif",        style:"italic",  weight:"bold"   },
+    Courier:               { family:"monospace",   style:"normal",  weight:"normal" },
+    CourierBold:           { family:"monospace",   style:"normal",  weight:"bold"   },
+    CourierOblique:        { family:"monospace",   style:"italic",  weight:"normal" },
 };
 
 // ── State ─────────────────────────────────────────────────────────────────────
@@ -317,7 +305,7 @@ let uploadedName  = "document";
 let totalPages    = 0;
 let renderedPages = {};        // { pageNum: { canvas, viewport, wrapper } }
 let sigPad        = null;
-let selectedFontKey  = "Helvetica_Normal";
+let selectedFontKey  = "Helvetica";
 let selectedFontSize = 12;
 
 const fields = {
@@ -625,18 +613,17 @@ function onSizeChange() {
 }
 
 function updateOverlayStyles() {
-    const def = FONT_DEFS[selectedFontKey] || FONT_DEFS.Helvetica_Normal;
+    const css = FONT_CSS[selectedFontKey] || FONT_CSS.Helvetica;
     for (const [fid, field] of Object.entries(fields)) {
         if (field.type === "sig") continue;
         for (const ov of Object.values(field.overlays)) {
-            ov.style.fontFamily = def.css.family;
-            ov.style.fontStyle  = def.css.style;
-            ov.style.fontWeight = def.css.weight;
+            ov.style.fontFamily = css.family;
+            ov.style.fontStyle  = css.style;
+            ov.style.fontWeight = css.weight;
             ov.style.fontSize   = selectedFontSize + "px";
         }
     }
 }
-
 
 // ── PDF generation ────────────────────────────────────────────────────────────
 async function generatePDF() {
@@ -658,8 +645,7 @@ async function generatePDF() {
             throwOnInvalidObject: false,
         });
 
-        const fontDef = FONT_DEFS[selectedFontKey] || FONT_DEFS.Helvetica_Normal;
-        const font = await pdfDoc.embedFont(PDFLib.StandardFonts[fontDef.std]);
+        const font = await pdfDoc.embedFont(PDFLib.StandardFonts[selectedFontKey]);
 
         // Embed signature once if needed
         let sigImg = null;
