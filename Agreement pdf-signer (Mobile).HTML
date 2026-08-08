@@ -10,9 +10,9 @@
     <meta name="apple-mobile-web-app-title" content="PDF Signer">
     <link rel="apple-touch-icon" href="./icons/icon-192.png">
     <meta name="theme-color" content="#4f46e5">
-    <script src="./lib/pdf.min.js"></script>
-    <script src="./lib/pdf-lib.min.js"></script>
-    <script src="./lib/signature_pad.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/signature_pad/4.1.7/signature_pad.umd.min.js"></script>
     <style>
         :root {
             --indigo: #4f46e5;
@@ -459,7 +459,7 @@
                     <span style="color:#059669;font-weight:700">&#9632;</span> Green = Signature<br>
                     <span style="color:#d97706;font-weight:700">&#9632;</span> Orange = Full Name &nbsp;
                     <span style="color:#9333ea;font-weight:700">&#9632;</span> Purple = Date<br>
-                    <span style="color:#555">Drag any coloured box on the page to reposition it.</span>
+                    <span style="color:#555">Drag any coloured box on the page to reposition it. Each page keeps its own position.</span>
                 </div>
                 <button class="btn btn-primary" id="gen-btn" onclick="generatePDF()" disabled>Open / Save Signed PDF</button>
             </div>
@@ -478,7 +478,8 @@
 </div><!-- end app -->
 
 <script>
-pdfjsLib.GlobalWorkerOptions.workerSrc = "./lib/pdf.worker.min.js";
+pdfjsLib.GlobalWorkerOptions.workerSrc =
+    "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
 
 // ── Font options ──────────────────────────────────────────────────────────────
 const FONT_DEFS = {
@@ -506,11 +507,15 @@ let pdfScale         = 1.3;
 let selectedFontKey  = "Helvetica_Normal";
 let selectedFontSize = 12;
 
+// xFrac/yFrac below are the *default* position used the first time an overlay
+// is created on a given page. Each page then tracks its own position in
+// `positions` (keyed by page number) so dragging a box on one page no longer
+// moves it on every other page.
 const fields = {
-    initials:  { id:"initials",  label:"Initials",  type:"text", inputId:"inp-initials", specId:"spec-initials", color:"#4f46e5", xFrac:0.87, yFrac:0.93,                         overlays:{}, pages:new Set() },
-    name:      { id:"name",      label:"Full Name", type:"text", inputId:"inp-name",     specId:"spec-name",     color:"#d97706", xFrac:0.08, yFrac:0.68,                         overlays:{}, pages:new Set() },
-    signature: { id:"signature", label:"Signature", type:"sig",  inputId:null,           specId:"spec-sig",      color:"#059669", xFrac:0.08, yFrac:0.55, wFrac:0.30, hFrac:0.07, overlays:{}, pages:new Set() },
-    date:      { id:"date",      label:"Date",      type:"text", inputId:"inp-date",     specId:"spec-date",     color:"#9333ea", xFrac:0.08, yFrac:0.78,                         overlays:{}, pages:new Set() },
+    initials:  { id:"initials",  label:"Initials",  type:"text", inputId:"inp-initials", specId:"spec-initials", color:"#4f46e5", xFrac:0.87, yFrac:0.93,                         overlays:{}, pages:new Set(), positions:{} },
+    name:      { id:"name",      label:"Full Name", type:"text", inputId:"inp-name",     specId:"spec-name",     color:"#d97706", xFrac:0.08, yFrac:0.68,                         overlays:{}, pages:new Set(), positions:{} },
+    signature: { id:"signature", label:"Signature", type:"sig",  inputId:null,           specId:"spec-sig",      color:"#059669", xFrac:0.08, yFrac:0.55, wFrac:0.30, hFrac:0.07, overlays:{}, pages:new Set(), positions:{} },
+    date:      { id:"date",      label:"Date",      type:"text", inputId:"inp-date",     specId:"spec-date",     color:"#9333ea", xFrac:0.08, yFrac:0.78,                         overlays:{}, pages:new Set(), positions:{} },
 };
 
 // ── Boot ──────────────────────────────────────────────────────────────────────
@@ -615,9 +620,15 @@ function handleFile(file) {
 }
 
 // ── PDF rendering ─────────────────────────────────────────────────────────────
+// The scale is calibrated against the actual first page's own (rotation-aware)
+// width, not a hardcoded page size — a hardcoded assumption breaks down for
+// landscape or non-A4 pages, causing the rendered box to be wider than the
+// available space and get squeezed by the max-width:100% CSS safety net below,
+// which desyncs on-screen drag positions from what gets exported.
+let naturalPageWidth = 595; // fallback until the real PDF is loaded
 function calcScale() {
     const mainW = document.getElementById("main").clientWidth - 48;
-    return Math.min(1.6, Math.max(0.6, mainW / 595));
+    return Math.min(1.6, Math.max(0.6, mainW / naturalPageWidth));
 }
 
 async function renderPDF() {
@@ -625,10 +636,15 @@ async function renderPDF() {
     renderedPages = {};
     for (const f of Object.values(fields)) { f.overlays = {}; f.pages = new Set(); }
 
-    pdfScale = calcScale();
     const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(pdfFileBytes) }).promise;
     totalPages = pdf.numPages;
     document.getElementById("fmeta").textContent = `${totalPages} page${totalPages > 1 ? "s" : ""}`;
+
+    // getViewport({ scale: 1 }) already accounts for the page's /Rotate flag,
+    // so this is the true on-screen width/height ratio for page 1.
+    const firstPage  = await pdf.getPage(1);
+    naturalPageWidth = firstPage.getViewport({ scale: 1 }).width;
+    pdfScale = calcScale();
 
     for (let n = 1; n <= totalPages; n++) {
         const page = await pdf.getPage(n);
@@ -740,13 +756,17 @@ function addOverlay(fieldId, pageNum) {
     const info  = renderedPages[pageNum];
     if (!info) return;
     const { wrapper } = info;
+    // Each page keeps its own remembered position; first time round it falls
+    // back to the field's default, and that gets captured for future re-renders.
+    const pos = field.positions[pageNum] || { xFrac: field.xFrac, yFrac: field.yFrac };
+    field.positions[pageNum] = pos;
 
     const ov = document.createElement("div");
     ov.className = "ov" + (field.type === "sig" ? " ov-sig" : "");
     ov.style.borderColor = field.color;
     ov.style.color       = field.color;
-    ov.style.left = Math.round(field.xFrac * wrapper.offsetWidth)  + "px";
-    ov.style.top  = Math.round(field.yFrac * wrapper.offsetHeight) + "px";
+    ov.style.left = Math.round(pos.xFrac * wrapper.offsetWidth)  + "px";
+    ov.style.top  = Math.round(pos.yFrac * wrapper.offsetHeight) + "px";
 
     if (field.type === "sig") {
         ov.style.width  = Math.round(field.wFrac * wrapper.offsetWidth)  + "px";
@@ -762,7 +782,7 @@ function addOverlay(fieldId, pageNum) {
         ov.innerHTML = `&#9783; <span class="ov-text">${escHtml(val)}</span>`;
     }
 
-    makeDraggable(ov, wrapper, fieldId);
+    makeDraggable(ov, wrapper, fieldId, pageNum);
     wrapper.appendChild(ov);
     field.overlays[pageNum] = ov;
 }
@@ -789,8 +809,8 @@ function updateSigPreviews() {
     }
 }
 
-// ── Draggable overlays ─────────────────────────────────────────────────────────
-function makeDraggable(el, container, fieldId) {
+// ── Draggable overlays (independent per page) ──────────────────────────────────
+function makeDraggable(el, container, fieldId, pageNum) {
     let sx, sy, sl, st;
     function coord(e) { const t = e.touches ? e.touches[0] : e; return { x: t.clientX, y: t.clientY }; }
     function start(e) {
@@ -815,17 +835,14 @@ function makeDraggable(el, container, fieldId) {
         document.removeEventListener("mouseup",   end);
         document.removeEventListener("touchmove", move);
         document.removeEventListener("touchend",  end);
-        if (!fieldId) return;
+        if (!fieldId || !pageNum) return;
         const field = fields[fieldId];
-        field.xFrac = parseInt(el.style.left) / container.offsetWidth;
-        field.yFrac = parseInt(el.style.top)  / container.offsetHeight;
-        for (const [pn, ov] of Object.entries(field.overlays)) {
-            if (ov === el) continue;
-            const w = renderedPages[+pn]?.wrapper;
-            if (!w) continue;
-            ov.style.left = Math.max(0, Math.min(Math.round(field.xFrac * w.offsetWidth),  w.offsetWidth  - ov.offsetWidth))  + "px";
-            ov.style.top  = Math.max(0, Math.min(Math.round(field.yFrac * w.offsetHeight), w.offsetHeight - ov.offsetHeight)) + "px";
-        }
+        // Save this page's position only — other pages for the same field are
+        // untouched, so each page can be positioned independently.
+        field.positions[pageNum] = {
+            xFrac: parseInt(el.style.left) / container.offsetWidth,
+            yFrac: parseInt(el.style.top)  / container.offsetHeight,
+        };
     }
     el.addEventListener("mousedown",  start);
     el.addEventListener("touchstart", start, { passive: false });
@@ -883,6 +900,66 @@ function updateOverlayStyles() {
     }
 }
 
+// ── Rotation-aware coordinate mapping ───────────────────────────────────────────
+// PDF pages can carry a /Rotate flag (0/90/180/270) that tells viewers to rotate
+// the whole page for display — this is how many "landscape" PDFs are actually
+// stored (portrait MediaBox + Rotate 90). pdf.js applies that rotation when
+// building its viewport, but pdf-lib's drawImage/drawText operate in the raw,
+// unrotated MediaBox coordinate space. Naively converting an on-screen (visual)
+// box into MediaBox coordinates via a simple width/height ratio only works when
+// Rotate is 0 — for 90/180/270 the element ends up mis-positioned AND drawn
+// sideways/upside-down relative to what the user placed on screen.
+//
+// The fix: use the viewport's actual transform matrix (which pdf.js derives from
+// the page's rotation) to map the visual on-screen box back into MediaBox space,
+// and compute a matching `rotate` angle so the drawn element is rotated exactly
+// enough to cancel out the page's own rotation — i.e. it appears upright and in
+// the right spot once the PDF is viewed (which re-applies the page rotation).
+function invertMatrix(m) {
+    const [a, b, c, d, e, f] = m;
+    const det = a * d - b * c;
+    const ia = d / det, ib = -b / det, ic = -c / det, id = a / det;
+    return [ia, ib, ic, id, -(ia * e + ic * f), -(ib * e + id * f)];
+}
+function applyMatrix(m, x, y) {
+    return [m[0] * x + m[2] * y + m[4], m[1] * x + m[3] * y + m[5]];
+}
+// px,py,ow,oh describe the overlay's box in on-screen canvas pixels (top-left
+// origin, y-down — i.e. straight from el.style.left/top/offsetWidth/Height).
+// nudgePts (optional) nudges the anchor "up" (in the visual sense) by that many
+// PDF points before mapping — used to match the old text-baseline offset.
+function mapOverlayToPdfSpace(viewport, px, py, ow, oh, nudgePts) {
+    const inv = invertMatrix(viewport.transform);
+    const nudgePx = (nudgePts || 0) * (viewport.scale || 1);
+    const p00 = applyMatrix(inv, px,      py + oh - nudgePx); // visual bottom-left
+    const p10 = applyMatrix(inv, px + ow, py + oh - nudgePx); // visual bottom-right
+    const p01 = applyMatrix(inv, px,      py - nudgePx);      // visual top-left
+    const edge1 = [p10[0] - p00[0], p10[1] - p00[1]];
+    const edge2 = [p01[0] - p00[0], p01[1] - p00[1]];
+    return {
+        x: p00[0], y: p00[1],
+        width:  Math.hypot(edge1[0], edge1[1]),
+        height: Math.hypot(edge2[0], edge2[1]),
+        rotate: Math.atan2(edge1[1], edge1[0]) * 180 / Math.PI,
+    };
+}
+
+// The on-screen preview shows the signature image with `object-fit: contain`
+// (see updateSigPreviews), so it keeps its natural aspect ratio and letterboxes
+// inside the drawn box. pdf-lib's drawImage has no such concept — it always
+// stretches the image to exactly fill the given width/height — so without this,
+// a signature box whose aspect ratio doesn't match the drawn signature's own
+// aspect ratio comes out stretched in the exported PDF even though it looked
+// fine in the preview. This computes a contain-fit rectangle (centered) inside
+// the target box, in the box's own local (pre-rotation) axes.
+function containFit(boxW, boxH, imgAspect) {
+    const boxAspect = boxW / boxH;
+    let w, h;
+    if (imgAspect > boxAspect) { w = boxW; h = boxW / imgAspect; }
+    else                       { h = boxH; w = boxH * imgAspect; }
+    return { w, h, dx: (boxW - w) / 2, dy: (boxH - h) / 2 };
+}
+
 // ── PDF generation ────────────────────────────────────────────────────────────
 async function generatePDF() {
     if (!pdfFileBytes) { alert("Please upload a PDF first."); return; }
@@ -911,26 +988,40 @@ async function generatePDF() {
         for (let i = 0; i < pdfPages.length; i++) {
             const page = pdfPages[i];
             const pn   = i + 1;
-            const { width, height } = page.getSize();
             const info = renderedPages[pn];
             if (!info) continue;
-            const { viewport: vp } = info;
-            const toX = px => (px / vp.width)  * width;
-            const toY = (py, elH) => height - ((py + elH) / vp.height) * height;
+            const { viewport: vp, wrapper } = info;
+
+            // Overlay positions/sizes are measured in the wrapper's on-screen
+            // CSS pixels. That normally equals the pdf.js viewport's own pixel
+            // size, but on some layouts (long/wide pages getting squeezed by a
+            // responsive max-width) the two can drift apart — rescaling here
+            // keeps the exported position matching exactly what was dragged on
+            // screen, regardless of any such CSS-driven resizing.
+            const scaleX = vp.width  / wrapper.offsetWidth;
+            const scaleY = vp.height / wrapper.offsetHeight;
 
             for (const [fid, field] of Object.entries(fields)) {
                 if (!field.pages.has(pn)) continue;
                 const ov = field.overlays[pn];
                 if (!ov) continue;
-                const ox = parseInt(ov.style.left), oy = parseInt(ov.style.top);
-                const ow = ov.offsetWidth,          oh = ov.offsetHeight;
+                const ox = parseInt(ov.style.left) * scaleX, oy = parseInt(ov.style.top) * scaleY;
+                const ow = ov.offsetWidth * scaleX,          oh = ov.offsetHeight * scaleY;
 
                 if (field.type === "sig" && sigImg) {
-                    page.drawImage(sigImg, { x: toX(ox), y: toY(oy, oh), width: (ow/vp.width)*width, height: (oh/vp.height)*height });
+                    const m = mapOverlayToPdfSpace(vp, ox, oy, ow, oh, 0);
+                    // Contain-fit the signature within the box, centered, so it
+                    // keeps its natural aspect ratio instead of stretching.
+                    const fit = containFit(m.width, m.height, sigImg.width / sigImg.height);
+                    const rad = m.rotate * Math.PI / 180;
+                    const dx  = fit.dx * Math.cos(rad) - fit.dy * Math.sin(rad);
+                    const dy  = fit.dx * Math.sin(rad) + fit.dy * Math.cos(rad);
+                    page.drawImage(sigImg, { x: m.x + dx, y: m.y + dy, width: fit.w, height: fit.h, rotate: PDFLib.degrees(m.rotate) });
                 } else if (field.type === "text" && field.inputId) {
                     const val = document.getElementById(field.inputId).value.trim();
                     if (!val) continue;
-                    page.drawText(val, { x: toX(ox), y: toY(oy, oh) + 2, size: selectedFontSize, font, color: PDFLib.rgb(0,0,0) });
+                    const m = mapOverlayToPdfSpace(vp, ox, oy, ow, oh, 2);
+                    page.drawText(val, { x: m.x, y: m.y, size: selectedFontSize, font, color: PDFLib.rgb(0,0,0), rotate: PDFLib.degrees(m.rotate) });
                 }
             }
         }
