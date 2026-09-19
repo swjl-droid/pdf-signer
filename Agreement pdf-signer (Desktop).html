@@ -91,6 +91,32 @@
             font-size: 12px; color: #ccc; pointer-events: none; text-align: center; line-height: 1.6;
         }
 
+
+        /* Resize grip, bottom-right of every box */
+        .ov-resize {
+            position: absolute; right: 0; bottom: 0;
+            width: 12px; height: 12px;
+            background: currentColor; opacity: .5;
+            border-radius: 3px 0 2px 0;
+            cursor: nwse-resize; touch-action: none; pointer-events: auto;
+        }
+        .ov-resize:hover { opacity: .9; }
+        .ov-content { pointer-events: none; }
+        .ov-sig .ov-content { display: block; width: 100%; height: 100%; }
+        /* A box that has been given an explicit size wraps its text inside it.
+           Border becomes an inset outline so the content box and the border box
+           are the same width — the wrap width on screen then matches the width
+           used when writing the PDF, to the pixel. */
+        .ov.ov-wrap {
+            align-items: flex-start;
+            padding: 0; border: none;
+            outline: 2px dashed currentColor; outline-offset: -2px;
+            overflow: hidden;
+        }
+        .ov.ov-wrap .ov-content {
+            display: block; width: 100%;
+            white-space: pre-wrap; overflow-wrap: anywhere;
+        }
         /* Style selects */
         .style-select {
             width: 100%; padding: 7px 9px;
@@ -205,6 +231,13 @@
                 <input class="si" id="spec-name" type="text" placeholder="e.g. page 9" oninput="onSpecChange('name')">
             </div>
 
+            <!-- Text (free text, max 100 characters) -->
+            <div class="field-row">
+                <div class="field-label"><span class="dot" style="background:#0891b2"></span>Text</div>
+                <input class="vi" id="inp-text" type="text" maxlength="100" placeholder="Up to 100 characters" oninput="onValueChange('text')">
+                <input class="si" id="spec-text" type="text" placeholder="e.g. all" oninput="onSpecChange('text')">
+            </div>
+
             <!-- Signature -->
             <div class="field-row">
                 <div class="field-label"><span class="dot" style="background:#059669"></span>Signature</div>
@@ -288,7 +321,8 @@
                 <span style="color:#4f46e5;font-weight:700">&#9632;</span> Blue = Initials &nbsp;
                 <span style="color:#059669;font-weight:700">&#9632;</span> Green = Signature<br>
                 <span style="color:#d97706;font-weight:700">&#9632;</span> Orange = Full Name &nbsp;
-                <span style="color:#9333ea;font-weight:700">&#9632;</span> Purple = Date
+                <span style="color:#9333ea;font-weight:700">&#9632;</span> Purple = Date<br>
+                <span style="color:#0891b2;font-weight:700">&#9632;</span> Teal = Text
             </div>
             <div style="height:12px"></div>
             <button class="btn btn-primary" id="gen-btn" onclick="generatePDF()" disabled>&#8595; Generate Signed PDF</button>
@@ -339,6 +373,7 @@ let selectedFontSize = 12;
 const fields = {
     initials:  { id:"initials",  label:"Initials",   type:"text", inputId:"inp-initials", specId:"spec-initials", color:"#4f46e5", xFrac:0.87, yFrac:0.93,                         overlays:{}, pages:new Set(), positions:{} },
     name:      { id:"name",      label:"Full Name",  type:"text", inputId:"inp-name",     specId:"spec-name",     color:"#d97706", xFrac:0.08, yFrac:0.68,                         overlays:{}, pages:new Set(), positions:{} },
+    text:      { id:"text",      label:"Text",       type:"text", inputId:"inp-text",     specId:"spec-text",     color:"#0891b2", xFrac:0.08, yFrac:0.86,                         overlays:{}, pages:new Set(), positions:{} },
     signature: { id:"signature", label:"Signature",  type:"sig",  inputId:null,           specId:"spec-sig",      color:"#059669", xFrac:0.08, yFrac:0.55, wFrac:0.30, hFrac:0.07, overlays:{}, pages:new Set(), positions:{} },
     date:      { id:"date",      label:"Date",       type:"text", inputId:"inp-date",     specId:"spec-date",     color:"#9333ea", xFrac:0.08, yFrac:0.78,                         overlays:{}, pages:new Set(), positions:{} },
 };
@@ -446,11 +481,8 @@ async function renderPDF() {
 // ── Value live-update ─────────────────────────────────────────────────────────
 function onValueChange(fieldId) {
     const field = fields[fieldId];
-    const val = document.getElementById(field.inputId).value || field.label;
-    for (const ov of Object.values(field.overlays)) {
-        const t = ov.querySelector(".ov-text");
-        if (t) t.textContent = val;
-    }
+    if (!field || field.type === "sig") return;
+    for (const [pn, ov] of Object.entries(field.overlays)) renderTextOverlay(ov, fieldId, +pn);
 }
 
 // ── Page spec ─────────────────────────────────────────────────────────────────
@@ -481,6 +513,163 @@ function applyPageSpec(fieldId) {
 }
 
 // ── Overlay creation ──────────────────────────────────────────────────────────
+
+// ── Box sizing & text wrapping ────────────────────────────────────────────────
+// Resizing a box stores wFrac/hFrac next to that page's position, so size is
+// per page exactly like position is. Text in a sized box wraps, and the wrap
+// points are computed with the *PDF* font's own metrics rather than the
+// browser's — so the preview breaks lines in the same places the exported PDF
+// does, instead of merely looking similar.
+const MIN_BOX_PX      = 24;
+const LINE_FACTOR     = 1.2;   // line height, as a multiple of the font size
+const BASELINE_FACTOR = 0.82;  // first baseline, measured down from the box top
+
+// pdf-lib's 14 standard fonts carry their own metrics and need no file data, so
+// they can be embedded once into a throwaway document purely for measuring.
+let _metricsDoc = null;
+const _metricsFonts = {};
+const metricsReady = (async () => {
+    try {
+        _metricsDoc = await PDFLib.PDFDocument.create();
+        for (const key of Object.keys(PDFLib.StandardFonts)) {
+            try { _metricsFonts[key] = await _metricsDoc.embedFont(PDFLib.StandardFonts[key]); }
+            catch (e) { /* non-text font, skip */ }
+        }
+    } catch (e) { console.warn("Font metrics unavailable, wrapping falls back to one line.", e); }
+    rewrapAll();
+})();
+
+function stdFontKey() { return selectedFontKey; }
+function metricsFont() { return _metricsFonts[stdFontKey()] || null; }
+
+// Greedy wrap. A single word wider than the box is broken across lines rather
+// than overflowing, which matters because this field accepts arbitrary text.
+function wrapLines(text, font, sizePt, maxWpt) {
+    const s = String(text);
+    if (!font || !(maxWpt > 0)) return [s];
+    const wid = str => font.widthOfTextAtSize(str, sizePt);
+    const lines = [];
+    let cur = "";
+    for (let word of s.split(/\s+/).filter(Boolean)) {
+        while (wid(word) > maxWpt && word.length > 1) {
+            if (cur) { lines.push(cur); cur = ""; }
+            let i = 1;
+            while (i < word.length && wid(word.slice(0, i + 1)) <= maxWpt) i++;
+            lines.push(word.slice(0, i));
+            word = word.slice(i);
+        }
+        const joined = cur ? cur + " " + word : word;
+        if (!cur || wid(joined) <= maxWpt) cur = joined;
+        else { lines.push(cur); cur = word; }
+    }
+    if (cur) lines.push(cur);
+    return lines.length ? lines : [""];
+}
+
+function ovEsc(s) {
+    return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;")
+                    .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+function ovContent(ov) { return ov.querySelector(".ov-content") || ov; }
+function setOvContent(ov, html) { ovContent(ov).innerHTML = html; }
+
+// Renders a text overlay: wrapped and scaled if the box has been resized,
+// otherwise the original auto-width single line.
+function renderTextOverlay(ov, fieldId, pageNum) {
+    const field = fields[fieldId];
+    const info  = renderedPages[pageNum];
+    if (!field || !info || field.type === "sig") return;
+    const raw  = field.inputId ? (document.getElementById(field.inputId).value || field.label) : field.label;
+    const font = metricsFont();
+
+    if (ov.dataset.sized !== "1" || !font) {
+        ov.classList.remove("ov-wrap");
+        ov.style.lineHeight = "";
+        ov.style.fontSize   = selectedFontSize + "px";
+        setOvContent(ov, '&#9783; <span class="ov-text">' + ovEsc(raw) + "</span>");
+        return;
+    }
+
+    const scale  = info.viewport.scale || 1;
+    const sizePt = selectedFontSize;
+    const lines  = wrapLines(raw, font, sizePt, ov.offsetWidth / scale);
+    const fits   = Math.max(1, Math.floor((ov.offsetHeight / scale) / (sizePt * LINE_FACTOR)));
+
+    ov.classList.add("ov-wrap");
+    ov.style.fontSize   = (sizePt * scale) + "px";
+    ov.style.lineHeight = (sizePt * LINE_FACTOR * scale) + "px";
+    setOvContent(ov, lines.slice(0, fits).map(ovEsc).join("<br>"));
+}
+
+function rewrapAll() {
+    if (typeof fields === "undefined") return;
+    for (const [fid, field] of Object.entries(fields)) {
+        if (field.type === "sig") continue;
+        for (const [pn, ov] of Object.entries(field.overlays)) renderTextOverlay(ov, fid, +pn);
+    }
+}
+
+// Drag the bottom-right grip to resize. Size is saved per page, alongside
+// position, so each page can have its own box.
+function makeResizable(ov, container, fieldId, pageNum) {
+    const handle = ov.querySelector(".ov-resize");
+    if (!handle) return;
+    let sx, sy, sw, sh;
+    const coord = e => { const t = e.touches ? e.touches[0] : e; return { x: t.clientX, y: t.clientY }; };
+
+    function start(e) {
+        e.preventDefault();
+        e.stopPropagation();          // keep the move handler on .ov from firing
+        const c = coord(e);
+        sx = c.x; sy = c.y; sw = ov.offsetWidth; sh = ov.offsetHeight;
+        document.addEventListener("mousemove", move);
+        document.addEventListener("mouseup",   end);
+        document.addEventListener("touchmove", move, { passive: false });
+        document.addEventListener("touchend",  end);
+    }
+    function move(e) {
+        e.preventDefault();
+        const c = coord(e);
+        const left = parseInt(ov.style.left) || 0, top = parseInt(ov.style.top) || 0;
+        ov.dataset.sized = "1";
+        ov.style.width  = Math.round(Math.max(MIN_BOX_PX, Math.min(sw + (c.x - sx), container.offsetWidth  - left))) + "px";
+        ov.style.height = Math.round(Math.max(MIN_BOX_PX, Math.min(sh + (c.y - sy), container.offsetHeight - top ))) + "px";
+        renderTextOverlay(ov, fieldId, pageNum);
+    }
+    function end() {
+        document.removeEventListener("mousemove", move);
+        document.removeEventListener("mouseup",   end);
+        document.removeEventListener("touchmove", move);
+        document.removeEventListener("touchend",  end);
+        const field = fields[fieldId];
+        const p = field.positions[pageNum] || (field.positions[pageNum] = { xFrac: field.xFrac, yFrac: field.yFrac });
+        p.wFrac = ov.offsetWidth  / container.offsetWidth;
+        p.hFrac = ov.offsetHeight / container.offsetHeight;
+    }
+    handle.addEventListener("mousedown",  start);
+    handle.addEventListener("touchstart", start, { passive: false });
+}
+
+// pdf-lib's standard fonts encode WinAnsi only. A free-text field can easily
+// contain something outside it (curly quotes pasted from Word, CJK, an emoji),
+// which would otherwise throw part-way through writing the PDF.
+const WINANSI_EXTRA = "\u20AC\u201A\u0192\u201E\u2026\u2020\u2021\u02C6\u2030\u0160\u2039\u0152\u017D\u2018\u2019\u201C\u201D\u2022\u2013\u2014\u02DC\u2122\u0161\u203A\u0153\u017E\u0178";
+function pdfSafe(s) {
+    return String(s)
+        .replace(/[\u2018\u2019\u201A\u2032]/g, "'")
+        .replace(/[\u201C\u201D\u201E\u2033]/g, '"')
+        .replace(/[\u2212\u2010\u2011]/g, "-")
+        .replace(/\u00A0/g, " ");
+}
+function pdfUnsupported(s) {
+    const bad = new Set();
+    for (const ch of pdfSafe(s)) {
+        const c = ch.codePointAt(0);
+        if (!((c >= 0x20 && c <= 0x7E) || (c >= 0xA0 && c <= 0xFF) || WINANSI_EXTRA.includes(ch))) bad.add(ch);
+    }
+    return [...bad];
+}
+
 function addOverlay(fieldId, pageNum) {
     const field = fields[fieldId];
     const info  = renderedPages[pageNum];
@@ -495,23 +684,30 @@ function addOverlay(fieldId, pageNum) {
     ov.style.color       = field.color;
     ov.style.left = Math.round(pos.xFrac * wrapper.offsetWidth)  + "px";
     ov.style.top  = Math.round(pos.yFrac * wrapper.offsetHeight) + "px";
+    ov.innerHTML = `<span class="ov-content"></span><span class="ov-resize" title="Drag to resize"></span>`;
 
-    if (field.type === "sig") {
-        ov.style.width  = Math.round(field.wFrac * wrapper.offsetWidth)  + "px";
-        ov.style.height = Math.round(field.hFrac * wrapper.offsetHeight) + "px";
-        if (hasSig()) {
-            ov.style.padding = "0";
-            ov.innerHTML = `<img src="${sigDataURL()}" style="width:100%;height:100%;object-fit:contain;pointer-events:none;display:block">`;
-        } else {
-            ov.innerHTML = `&#9998; <span class="ov-text">Signature</span>`;
-        }
-    } else {
-        const val = field.inputId ? (document.getElementById(field.inputId).value || field.label) : field.label;
-        ov.innerHTML = `&#9783; <span class="ov-text">${val}</span>`;
+    // An explicit size: this page's saved one, or the signature's built-in default.
+    const wF = pos.wFrac != null ? pos.wFrac : (field.type === "sig" ? field.wFrac : null);
+    const hF = pos.hFrac != null ? pos.hFrac : (field.type === "sig" ? field.hFrac : null);
+    if (wF != null && hF != null) {
+        ov.style.width   = Math.round(wF * wrapper.offsetWidth)  + "px";
+        ov.style.height  = Math.round(hF * wrapper.offsetHeight) + "px";
+        ov.dataset.sized = "1";
     }
 
+    if (field.type === "sig") {
+        if (hasSig()) {
+            ov.style.padding = "0";
+            setOvContent(ov, `<img src="${sigDataURL()}" style="width:100%;height:100%;object-fit:contain;pointer-events:none;display:block">`);
+        } else {
+            setOvContent(ov, `&#9998; <span class="ov-text">Signature</span>`);
+        }
+    }
+
+    wrapper.appendChild(ov);                       // must be measurable before wrapping
+    if (field.type !== "sig") renderTextOverlay(ov, fieldId, pageNum);
     makeDraggable(ov, wrapper, fieldId, pageNum);
-    wrapper.appendChild(ov);
+    makeResizable(ov, wrapper, fieldId, pageNum);
     field.overlays[pageNum] = ov;
 }
 
@@ -660,7 +856,9 @@ function makeDraggable(el, container, fieldId, pageNum) {
         const field = fields[fieldId];
         // Save this page's position only — other pages for the same field are
         // untouched, so each page can be positioned independently.
+        const prevPos = field.positions[pageNum] || {};
         field.positions[pageNum] = {
+            ...prevPos,                       // keep any size this page was given
             xFrac: parseInt(el.style.left) / container.offsetWidth,
             yFrac: parseInt(el.style.top)  / container.offsetHeight,
         };
@@ -729,11 +927,11 @@ function updateOverlayStyles() {
     const css = FONT_CSS[selectedFontKey] || FONT_CSS.Helvetica;
     for (const [fid, field] of Object.entries(fields)) {
         if (field.type === "sig") continue;
-        for (const ov of Object.values(field.overlays)) {
+        for (const [pn, ov] of Object.entries(field.overlays)) {
             ov.style.fontFamily = css.family;
             ov.style.fontStyle  = css.style;
             ov.style.fontWeight = css.weight;
-            ov.style.fontSize   = selectedFontSize + "px";
+            renderTextOverlay(ov, fid, +pn);   // re-wraps and re-scales a sized box
         }
     }
 }
@@ -856,8 +1054,33 @@ async function generatePDF() {
                         rotate: PDFLib.degrees(m.rotate),
                     });
                 } else if (field.type === "text" && field.inputId) {
-                    const val = document.getElementById(field.inputId).value.trim();
+                    const val = pdfSafe(document.getElementById(field.inputId).value.trim());
                     if (!val) continue;
+
+                    // A resized box wraps its text; the lines are computed with
+                    // the same font metrics and the same box width the preview
+                    // used, so the two agree exactly.
+                    if (ov.dataset.sized === "1") {
+                        const b     = mapOverlayToPdfSpace(vp, ox, oy, ow, oh, 0);
+                        const lines = wrapLines(val, font, selectedFontSize, b.width);
+                        const lh    = selectedFontSize * LINE_FACTOR;
+                        const rad   = b.rotate * Math.PI / 180;
+                        const cs = Math.cos(rad), sn = Math.sin(rad);
+                        for (let li = 0; li < lines.length; li++) {
+                            // offset from the box's bottom-left, in the box's own axes
+                            const ly = b.height - (li * lh + selectedFontSize * BASELINE_FACTOR);
+                            if (ly < -selectedFontSize * 0.25) break;   // past the bottom edge
+                            page.drawText(lines[li], {
+                                x: b.x - ly * sn, y: b.y + ly * cs,
+                                size:  selectedFontSize,
+                                font:  font,
+                                color: PDFLib.rgb(0, 0, 0),
+                                rotate: PDFLib.degrees(b.rotate),
+                            });
+                        }
+                        continue;
+                    }
+
                     const m = mapOverlayToPdfSpace(vp, ox, oy, ow, oh, 2);
                     page.drawText(val, {
                         x: m.x, y: m.y,
