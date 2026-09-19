@@ -1,4 +1,4 @@
-const CACHE = "pdf-signer-v2";
+const CACHE = "pdf-signer-v3";   // was v2
 const ASSETS = [
     "./Agreement%20pdf-signer%20(Mobile).HTML",
     "./lib/pdf.min.js",
