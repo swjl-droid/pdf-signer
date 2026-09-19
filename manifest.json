@@ -2,7 +2,7 @@
   "name": "PDF Signer",
   "short_name": "PDF Signer",
   "description": "Sign PDF documents on your device",
-  "start_url": "./Agreement%20pdf-signer%20(Mobile).HTML",
+  "start_url": "./Agreement%20pdf-signer%20(Mobile).html",
   "display": "standalone",
   "background_color": "#f0f2f5",
   "theme_color": "#4f46e5",

@@ -1,6 +1,9 @@
-const CACHE = "pdf-signer-v3";   // was v2
+const CACHE = "pdf-signer-v4";
 const ASSETS = [
-    "./Agreement%20pdf-signer%20(Mobile).HTML",
+    "./",
+    "./index.html",
+    "./Agreement%20pdf-signer%20(Mobile).html",
+    "./Agreement%20pdf-signer%20(Desktop).html",
     "./lib/pdf.min.js",
     "./lib/pdf.worker.min.js",
     "./lib/pdf-lib.min.js",
@@ -24,8 +27,33 @@ self.addEventListener("activate", e => {
     );
 });
 
+// Network-first for pages, cache-first for everything else.
+//
+// The old handler was cache-first for *everything*, which meant a page already
+// in the cache was served forever and edits pushed to GitHub never appeared
+// until the cache name changed. Pages now always try the network first and fall
+// back to the cache only when offline, so the app stays up to date on its own.
+// The libraries under lib/ never change without a filename change, so they stay
+// cache-first and keep the app fast and fully usable offline.
 self.addEventListener("fetch", e => {
-    e.respondWith(
-        caches.match(e.request).then(cached => cached || fetch(e.request))
-    );
+    if (e.request.method !== "GET") return;
+
+    const isPage = e.request.mode === "navigate" ||
+                   e.request.destination === "document";
+
+    if (isPage) {
+        e.respondWith(
+            fetch(e.request)
+                .then(res => {
+                    const copy = res.clone();
+                    caches.open(CACHE).then(c => c.put(e.request, copy)).catch(() => {});
+                    return res;
+                })
+                .catch(() => caches.match(e.request).then(c => c || caches.match("./index.html")))
+        );
+    } else {
+        e.respondWith(
+            caches.match(e.request).then(cached => cached || fetch(e.request))
+        );
+    }
 });

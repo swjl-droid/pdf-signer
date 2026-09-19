@@ -4,9 +4,11 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
     <title>PDF Signer</title>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/signature_pad/4.1.7/signature_pad.umd.min.js"></script>
+    <!-- Served from ./lib/ so the app also works offline (these are the files
+         sw.js caches). -->
+    <script src="./lib/pdf.min.js"></script>
+    <script src="./lib/pdf-lib.min.js"></script>
+    <script src="./lib/signature_pad.umd.min.js"></script>
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #f0f2f5; color: #1a1a2e; }
@@ -71,6 +73,18 @@
             background: #fff; position: relative; overflow: hidden; touch-action: none;
         }
         #sig-canvas { display: block; touch-action: none; cursor: crosshair; background: #fff; }
+        /* Uploaded signature image, shown over the drawing pad */
+        #sig-upload-preview {
+            position: absolute; inset: 0; width: 100%; height: 100%;
+            object-fit: contain; background: #fff;
+            display: none; pointer-events: none;
+        }
+        .sig-opt {
+            display: flex; align-items: center; gap: 6px;
+            font-size: 12px; color: #666; margin-top: 8px; cursor: pointer;
+        }
+        .sig-opt input { width: 14px; height: 14px; }
+
         .sig-hint {
             position: absolute; inset: 0;
             display: flex; align-items: center; justify-content: center;
@@ -151,6 +165,7 @@
                 <div class="upload-icon">&#128196;</div>
                 <p>Click or drag &amp; drop a PDF</p>
                 <p class="upload-hint">Any PDF document</p>
+                <p class="upload-hint" style="margin-top:6px;line-height:1.5">Google Drive / OneDrive files appear in your file picker too</p>
             </div>
             <input type="file" id="file-input" accept=".pdf" style="display:none" onchange="handleFile(this.files[0])">
         </div>
@@ -246,10 +261,19 @@
             <h3>4 &#8212; Draw Signature</h3>
             <div class="sig-wrap">
                 <canvas id="sig-canvas" width="340" height="170"></canvas>
+                <img id="sig-upload-preview" alt="">
                 <div class="sig-hint" id="sig-hint">&#9998; Sign here &#8212; finger, stylus or mouse</div>
             </div>
             <div style="height:8px"></div>
-            <button class="btn btn-ghost btn-sm" onclick="clearSig()">&#8635; Clear</button>
+            <div style="display:flex;gap:8px">
+                <button class="btn btn-ghost btn-sm" style="flex:1" onclick="pickSigImage()">&#11014; Upload image</button>
+                <button class="btn btn-ghost btn-sm" style="flex:1" onclick="clearSig()">&#8635; Clear</button>
+            </div>
+            <input type="file" id="sig-file-input" accept="image/*" style="display:none" onchange="handleSigImage(this.files[0])">
+            <label class="sig-opt" title="Best for a photo or scan of a signature on paper">
+                <input type="checkbox" id="sig-strip-bg" checked onchange="processSigImage()">
+                Remove white background from uploaded image
+            </label>
         </div>
 
         <div class="divider"></div>
@@ -259,7 +283,8 @@
             <h3>5 &#8212; Position &amp; Generate</h3>
             <div class="legend">
                 Drag any coloured box on the pages to reposition it.<br>
-                Moving one box syncs all boxes for that field.<br><br>
+                Each page keeps its own position, so the same field can sit in a
+                different spot on every page.<br><br>
                 <span style="color:#4f46e5;font-weight:700">&#9632;</span> Blue = Initials &nbsp;
                 <span style="color:#059669;font-weight:700">&#9632;</span> Green = Signature<br>
                 <span style="color:#d97706;font-weight:700">&#9632;</span> Orange = Full Name &nbsp;
@@ -280,8 +305,7 @@
 </div>
 
 <script>
-pdfjsLib.GlobalWorkerOptions.workerSrc =
-    "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+pdfjsLib.GlobalWorkerOptions.workerSrc = "./lib/pdf.worker.min.js";
 
 const SCALE = 1.3;
 
@@ -308,11 +332,15 @@ let sigPad        = null;
 let selectedFontKey  = "Helvetica";
 let selectedFontSize = 12;
 
+// xFrac/yFrac below are the *default* position used the first time an overlay
+// is created on a given page. Each page then tracks its own position in
+// `positions` (keyed by page number) so dragging a box on one page no longer
+// moves it on every other page.
 const fields = {
-    initials:  { id:"initials",  label:"Initials",   type:"text", inputId:"inp-initials", specId:"spec-initials", color:"#4f46e5", xFrac:0.87, yFrac:0.93,                         overlays:{}, pages:new Set() },
-    name:      { id:"name",      label:"Full Name",  type:"text", inputId:"inp-name",     specId:"spec-name",     color:"#d97706", xFrac:0.08, yFrac:0.68,                         overlays:{}, pages:new Set() },
-    signature: { id:"signature", label:"Signature",  type:"sig",  inputId:null,           specId:"spec-sig",      color:"#059669", xFrac:0.08, yFrac:0.55, wFrac:0.30, hFrac:0.07, overlays:{}, pages:new Set() },
-    date:      { id:"date",      label:"Date",       type:"text", inputId:"inp-date",     specId:"spec-date",     color:"#9333ea", xFrac:0.08, yFrac:0.78,                         overlays:{}, pages:new Set() },
+    initials:  { id:"initials",  label:"Initials",   type:"text", inputId:"inp-initials", specId:"spec-initials", color:"#4f46e5", xFrac:0.87, yFrac:0.93,                         overlays:{}, pages:new Set(), positions:{} },
+    name:      { id:"name",      label:"Full Name",  type:"text", inputId:"inp-name",     specId:"spec-name",     color:"#d97706", xFrac:0.08, yFrac:0.68,                         overlays:{}, pages:new Set(), positions:{} },
+    signature: { id:"signature", label:"Signature",  type:"sig",  inputId:null,           specId:"spec-sig",      color:"#059669", xFrac:0.08, yFrac:0.55, wFrac:0.30, hFrac:0.07, overlays:{}, pages:new Set(), positions:{} },
+    date:      { id:"date",      label:"Date",       type:"text", inputId:"inp-date",     specId:"spec-date",     color:"#9333ea", xFrac:0.08, yFrac:0.78,                         overlays:{}, pages:new Set(), positions:{} },
 };
 
 // ── Boot ──────────────────────────────────────────────────────────────────────
@@ -325,6 +353,7 @@ document.addEventListener("DOMContentLoaded", () => {
         minWidth: 0.5, maxWidth: 2,
     });
     sigPad.addEventListener("beginStroke", () => {
+        discardUploadedSig();   // drawing replaces an uploaded image
         document.getElementById("sig-hint").style.display = "none";
     });
     sigPad.addEventListener("endStroke", updateSigPreviews);
@@ -458,19 +487,21 @@ function addOverlay(fieldId, pageNum) {
     if (!info) return;
 
     const { wrapper } = info;
+    // This page's own saved position, falling back to the field default.
+    const pos = field.positions[pageNum] || { xFrac: field.xFrac, yFrac: field.yFrac };
     const ov = document.createElement("div");
     ov.className = "ov" + (field.type === "sig" ? " ov-sig" : "");
     ov.style.borderColor = field.color;
     ov.style.color       = field.color;
-    ov.style.left = Math.round(field.xFrac * wrapper.offsetWidth)  + "px";
-    ov.style.top  = Math.round(field.yFrac * wrapper.offsetHeight) + "px";
+    ov.style.left = Math.round(pos.xFrac * wrapper.offsetWidth)  + "px";
+    ov.style.top  = Math.round(pos.yFrac * wrapper.offsetHeight) + "px";
 
     if (field.type === "sig") {
         ov.style.width  = Math.round(field.wFrac * wrapper.offsetWidth)  + "px";
         ov.style.height = Math.round(field.hFrac * wrapper.offsetHeight) + "px";
-        if (!sigPad.isEmpty()) {
+        if (hasSig()) {
             ov.style.padding = "0";
-            ov.innerHTML = `<img src="${sigPad.toDataURL("image/png")}" style="width:100%;height:100%;object-fit:contain;pointer-events:none;display:block">`;
+            ov.innerHTML = `<img src="${sigDataURL()}" style="width:100%;height:100%;object-fit:contain;pointer-events:none;display:block">`;
         } else {
             ov.innerHTML = `&#9998; <span class="ov-text">Signature</span>`;
         }
@@ -479,14 +510,101 @@ function addOverlay(fieldId, pageNum) {
         ov.innerHTML = `&#9783; <span class="ov-text">${val}</span>`;
     }
 
-    makeDraggable(ov, wrapper, fieldId);
+    makeDraggable(ov, wrapper, fieldId, pageNum);
     wrapper.appendChild(ov);
     field.overlays[pageNum] = ov;
+}
+
+
+// ── Signature source: drawn, or an uploaded image ─────────────────────────────
+// An uploaded image takes precedence over the pad until it is cleared or the
+// user starts drawing again. Every uploaded file is re-encoded through a canvas
+// to PNG because pdf-lib's embedPng cannot read a JPEG, and phone cameras and
+// most scanners produce JPEGs.
+let rawSigImageURL = null;   // exactly as uploaded, kept so the background
+                             // toggle can re-process without re-reading the file
+let uploadedSigURL = null;   // processed PNG actually used for preview + export
+
+function sigDataURL() {
+    if (uploadedSigURL) return uploadedSigURL;
+    return (sigPad && !sigPad.isEmpty()) ? sigPad.toDataURL("image/png") : null;
+}
+function hasSig() { return !!sigDataURL(); }
+
+function pickSigImage() {
+    const i = document.getElementById("sig-file-input");
+    i.value = "";          // so re-picking the same file still fires onchange
+    i.click();
+}
+
+function handleSigImage(file) {
+    if (!file) return;
+    if (!/^image\//.test(file.type)) { alert("Please choose an image file (PNG or JPG)."); return; }
+    const reader = new FileReader();
+    reader.onload  = ev => { rawSigImageURL = ev.target.result; processSigImage(); };
+    reader.onerror = () => alert("That file could not be read.");
+    reader.readAsDataURL(file);
+}
+
+function processSigImage() {
+    if (!rawSigImageURL) return;
+    const img = new Image();
+    img.onload = () => {
+        const MAX   = 1600;                       // keeps the embedded PNG small
+        const scale = Math.min(1, MAX / img.naturalWidth);
+        const w = Math.max(1, Math.round(img.naturalWidth  * scale));
+        const h = Math.max(1, Math.round(img.naturalHeight * scale));
+        const c = document.createElement("canvas");
+        c.width = w; c.height = h;
+        const ctx = c.getContext("2d");
+        ctx.drawImage(img, 0, 0, w, h);
+        const strip = document.getElementById("sig-strip-bg");
+        if (strip && strip.checked) stripBackground(ctx, w, h);
+        uploadedSigURL = c.toDataURL("image/png");
+        showUploadedSig();
+    };
+    img.onerror = () => alert("That image could not be decoded.");
+    img.src = rawSigImageURL;
+}
+
+// Turns a photo or scan of a signature on white paper into transparent-background
+// ink. Alpha comes from luminance so the edges stay anti-aliased rather than
+// jagged, and any transparency already in a PNG is multiplied in rather than
+// overwritten, so a proper transparent signature survives untouched.
+function stripBackground(ctx, w, h) {
+    const T = 235;                                // luminance treated as "paper"
+    const d = ctx.getImageData(0, 0, w, h);
+    const p = d.data;
+    for (let i = 0; i < p.length; i += 4) {
+        const lum = 0.299 * p[i] + 0.587 * p[i + 1] + 0.114 * p[i + 2];
+        const ink = lum >= T ? 0 : Math.round((T - lum) * 255 / T);
+        p[i] = 17; p[i + 1] = 17; p[i + 2] = 17;  // normalise to near-black ink
+        p[i + 3] = Math.round(p[i + 3] * ink / 255);
+    }
+    ctx.putImageData(d, 0, 0);
+}
+
+function discardUploadedSig() {
+    if (!uploadedSigURL && !rawSigImageURL) return;
+    rawSigImageURL = uploadedSigURL = null;
+    const prev = document.getElementById("sig-upload-preview");
+    if (prev) { prev.style.display = "none"; prev.removeAttribute("src"); }
+    const i = document.getElementById("sig-file-input");
+    if (i) i.value = "";
+}
+
+function showUploadedSig() {
+    const prev = document.getElementById("sig-upload-preview");
+    prev.src = uploadedSigURL;
+    prev.style.display = "block";
+    document.getElementById("sig-hint").style.display = "none";
+    updateSigPreviews();
 }
 
 // ── Signature pad ─────────────────────────────────────────────────────────────
 function clearSig() {
     sigPad.clear();
+    discardUploadedSig();
     document.getElementById("sig-hint").style.display = "flex";
     for (const ov of Object.values(fields.signature.overlays)) {
         ov.style.padding  = "";
@@ -496,8 +614,8 @@ function clearSig() {
 }
 
 function updateSigPreviews() {
-    if (sigPad.isEmpty()) return;
-    const url = sigPad.toDataURL("image/png");
+    const url = sigDataURL();
+    if (!url) return;
     for (const ov of Object.values(fields.signature.overlays)) {
         ov.style.padding  = "0";
         ov.style.overflow = "hidden";
@@ -505,8 +623,8 @@ function updateSigPreviews() {
     }
 }
 
-// ── Drag & drop (mouse + touch, synced across pages) ──────────────────────────
-function makeDraggable(el, container, fieldId) {
+// ── Drag & drop (mouse + touch, independent per page) ─────────────────────────
+function makeDraggable(el, container, fieldId, pageNum) {
     let sx, sy, sl, st;
 
     function coord(e) {
@@ -538,19 +656,14 @@ function makeDraggable(el, container, fieldId) {
         document.removeEventListener("touchmove", move);
         document.removeEventListener("touchend",  end);
 
-        if (!fieldId) return;
+        if (!fieldId || !pageNum) return;
         const field = fields[fieldId];
-        // Save fractional position
-        field.xFrac = parseInt(el.style.left) / container.offsetWidth;
-        field.yFrac = parseInt(el.style.top)  / container.offsetHeight;
-        // Sync sibling overlays
-        for (const [pn, ov] of Object.entries(field.overlays)) {
-            if (ov === el) continue;
-            const w = renderedPages[+pn]?.wrapper;
-            if (!w) continue;
-            ov.style.left = Math.max(0, Math.min(Math.round(field.xFrac * w.offsetWidth),  w.offsetWidth  - ov.offsetWidth))  + "px";
-            ov.style.top  = Math.max(0, Math.min(Math.round(field.yFrac * w.offsetHeight), w.offsetHeight - ov.offsetHeight)) + "px";
-        }
+        // Save this page's position only — other pages for the same field are
+        // untouched, so each page can be positioned independently.
+        field.positions[pageNum] = {
+            xFrac: parseInt(el.style.left) / container.offsetWidth,
+            yFrac: parseInt(el.style.top)  / container.offsetHeight,
+        };
     }
     el.addEventListener("mousedown",  start);
     el.addEventListener("touchstart", start, { passive: false });
@@ -625,17 +738,67 @@ function updateOverlayStyles() {
     }
 }
 
+// ── Coordinate mapping (rotation-aware) ───────────────────────────────────────
+// pdf.js's viewport.transform maps PDF user space onto the canvas and already
+// accounts for the page's /Rotate flag, so inverting it is what lets a box
+// dragged on screen land in the right place on a landscape or rotated page.
+// Doing the naive "flip y, scale by page size" mapping instead puts fields on
+// the wrong edge of any page whose /Rotate is not 0.
+function invertMatrix(m) {
+    const [a, b, c, d, e, f] = m;
+    const det = a * d - b * c;
+    const ia = d / det, ib = -b / det, ic = -c / det, id = a / det;
+    return [ia, ib, ic, id, -(ia * e + ic * f), -(ib * e + id * f)];
+}
+function applyMatrix(m, x, y) {
+    return [m[0] * x + m[2] * y + m[4], m[1] * x + m[3] * y + m[5]];
+}
+// px,py,ow,oh describe the overlay's box in on-screen canvas pixels (top-left
+// origin, y-down — i.e. straight from el.style.left/top/offsetWidth/Height).
+// nudgePts (optional) nudges the anchor "up" in the visual sense by that many
+// PDF points before mapping — used to match the old text-baseline offset.
+// Returns the box in PDF user space plus the rotation needed to draw it so it
+// reads the same way round as it did on screen.
+function mapOverlayToPdfSpace(viewport, px, py, ow, oh, nudgePts) {
+    const inv = invertMatrix(viewport.transform);
+    const nudgePx = (nudgePts || 0) * (viewport.scale || 1);
+    const p00 = applyMatrix(inv, px,      py + oh - nudgePx); // visual bottom-left
+    const p10 = applyMatrix(inv, px + ow, py + oh - nudgePx); // visual bottom-right
+    const p01 = applyMatrix(inv, px,      py - nudgePx);      // visual top-left
+    const edge1 = [p10[0] - p00[0], p10[1] - p00[1]];
+    const edge2 = [p01[0] - p00[0], p01[1] - p00[1]];
+    return {
+        x: p00[0], y: p00[1],
+        width:  Math.hypot(edge1[0], edge1[1]),
+        height: Math.hypot(edge2[0], edge2[1]),
+        rotate: Math.atan2(edge1[1], edge1[0]) * 180 / Math.PI,
+    };
+}
+
+// The on-screen preview shows the signature with `object-fit: contain`, so it
+// keeps its aspect ratio and letterboxes inside the box. pdf-lib's drawImage has
+// no such concept — it stretches to exactly fill the width/height given — so
+// without this a signature whose shape differs from the box comes out distorted
+// even though the preview looked right.
+function containFit(boxW, boxH, imgAspect) {
+    const boxAspect = boxW / boxH;
+    let w, h;
+    if (imgAspect > boxAspect) { w = boxW; h = boxW / imgAspect; }
+    else                       { h = boxH; w = boxH * imgAspect; }
+    return { w, h, dx: (boxW - w) / 2, dy: (boxH - h) / 2 };
+}
+
 // ── PDF generation ────────────────────────────────────────────────────────────
 async function generatePDF() {
     if (!pdfFileBytes) { alert("Please upload a PDF first."); return; }
     if (!Object.values(fields).some(f => f.pages.size > 0))
         { alert("Specify pages for at least one field."); return; }
-    if (fields.signature.pages.size > 0 && sigPad.isEmpty())
-        { alert("Signature field has pages set but no signature drawn."); return; }
+    if (fields.signature.pages.size > 0 && !hasSig())
+        { alert("Signature field has pages set but no signature drawn or uploaded."); return; }
 
     const btn = document.getElementById("gen-btn");
     btn.disabled = true;
-    btn.textContent = "&#9203; Generating…";
+    btn.textContent = "\u23F3 Generating…";
 
     try {
         // Fresh copy so PDF.js worker detach doesn't affect us
@@ -649,8 +812,8 @@ async function generatePDF() {
 
         // Embed signature once if needed
         let sigImg = null;
-        if (fields.signature.pages.size > 0 && !sigPad.isEmpty()) {
-            const b64 = sigPad.toDataURL("image/png").split(",")[1];
+        if (fields.signature.pages.size > 0 && hasSig()) {
+            const b64 = sigDataURL().split(",")[1];
             const bin = atob(b64);
             const buf = new Uint8Array(bin.length);
             for (let i = 0; i < bin.length; i++) buf[i] = bin.charCodeAt(i);
@@ -660,40 +823,48 @@ async function generatePDF() {
         const pdfPages = pdfDoc.getPages();
 
         for (let i = 0; i < pdfPages.length; i++) {
-            const page   = pdfPages[i];
-            const pn     = i + 1;
-            const { width, height } = page.getSize();
-            const info   = renderedPages[pn];
+            const page = pdfPages[i];
+            const pn   = i + 1;
+            const info = renderedPages[pn];
             if (!info) continue;
-            const { viewport: vp } = info;
+            const { viewport: vp, wrapper } = info;
 
-            const toX = px => (px / vp.width)  * width;
-            const toY = (py, elH) => height - ((py + elH) / vp.height) * height;
+            // Overlay positions are measured in the wrapper's on-screen CSS
+            // pixels, which normally equals the viewport's own pixel size but
+            // can drift if CSS ever squeezes the wrapper. Rescaling here keeps
+            // the exported position matching what was dragged on screen.
+            const scaleX = vp.width  / wrapper.offsetWidth;
+            const scaleY = vp.height / wrapper.offsetHeight;
 
             for (const [fid, field] of Object.entries(fields)) {
                 if (!field.pages.has(pn)) continue;
                 const ov = field.overlays[pn];
                 if (!ov) continue;
 
-                const ox = parseInt(ov.style.left);
-                const oy = parseInt(ov.style.top);
-                const ow = ov.offsetWidth;
-                const oh = ov.offsetHeight;
+                const ox = parseInt(ov.style.left) * scaleX, oy = parseInt(ov.style.top) * scaleY;
+                const ow = ov.offsetWidth * scaleX,          oh = ov.offsetHeight * scaleY;
 
                 if (field.type === "sig" && sigImg) {
+                    const m   = mapOverlayToPdfSpace(vp, ox, oy, ow, oh, 0);
+                    const fit = containFit(m.width, m.height, sigImg.width / sigImg.height);
+                    const rad = m.rotate * Math.PI / 180;
+                    const dx  = fit.dx * Math.cos(rad) - fit.dy * Math.sin(rad);
+                    const dy  = fit.dx * Math.sin(rad) + fit.dy * Math.cos(rad);
                     page.drawImage(sigImg, {
-                        x: toX(ox), y: toY(oy, oh),
-                        width:  (ow / vp.width)  * width,
-                        height: (oh / vp.height) * height,
+                        x: m.x + dx, y: m.y + dy,
+                        width: fit.w, height: fit.h,
+                        rotate: PDFLib.degrees(m.rotate),
                     });
                 } else if (field.type === "text" && field.inputId) {
                     const val = document.getElementById(field.inputId).value.trim();
                     if (!val) continue;
+                    const m = mapOverlayToPdfSpace(vp, ox, oy, ow, oh, 2);
                     page.drawText(val, {
-                        x: toX(ox), y: toY(oy, oh) + 2,
+                        x: m.x, y: m.y,
                         size:  selectedFontSize,
                         font:  font,
                         color: PDFLib.rgb(0, 0, 0),
+                        rotate: PDFLib.degrees(m.rotate),
                     });
                 }
             }
@@ -710,7 +881,7 @@ async function generatePDF() {
         document.body.removeChild(a);
         URL.revokeObjectURL(url);
 
-        btn.textContent = "&#10003; Downloaded!";
+        btn.textContent = "\u2713 Downloaded!";
         setTimeout(() => { btn.disabled = false; btn.textContent = "↓ Generate Signed PDF"; }, 4000);
 
     } catch (err) {
