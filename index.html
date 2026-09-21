@@ -122,6 +122,15 @@
     text-transform: uppercase;
   }
 
+  /* Set apart from the two live versions: this one is a download, not a page. */
+  .choice.offline {
+    margin-top: 18px;
+    background: transparent;
+    border-style: dashed;
+    box-shadow: none;
+  }
+  .choice.offline .icon { background: transparent; border: 1px dashed var(--border); }
+
   footer {
     margin-top: 24px;
     text-align: center;
@@ -159,6 +168,15 @@
         <span class="arrow" aria-hidden="true">&rarr;</span>
       </a>
     </nav>
+
+    <a class="choice offline" href="./Agreement%20pdf-signer%20(Off-Line).html" download>
+      <span class="icon" aria-hidden="true">&#11015;</span>
+      <span>
+        <span class="label">Download for off-line use</span>
+        <span class="sub">One self-contained file &middot; 2.9&nbsp;MB &middot; no internet needed</span>
+      </span>
+      <span class="arrow" aria-hidden="true">&darr;</span>
+    </a>
 
     <footer>
       Your files never leave your device &mdash; everything runs in the browser.
